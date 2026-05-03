@@ -34,14 +34,19 @@ tahun_evaluasi = st.sidebar.slider("Tahun Target Evaluasi MCDM", 2025, 2060, 206
 selisih_tahun = tahun_evaluasi - 2025
 
 st.sidebar.divider()
-st.sidebar.header("🧠 3. Integrasi AI (Opsional)")
-# ✅ FIX 1: Hapus API key yang di-hardcode — biarkan kosong, user isi sendiri
-api_key = st.sidebar.text_input(
-    "Gemini API Key",
-    type="password",
-    placeholder="Masukkan API Key Anda...",
-    help="Dapatkan gratis di aistudio.google.com"
-)
+st.sidebar.header("🧠 3. Integrasi AI")
+
+# Logika pintar untuk membaca rahasia secara otomatis
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+    st.sidebar.success("✅ AI terhubung otomatis menggunakan Server Key.")
+else:
+    api_key = st.sidebar.text_input(
+        "Gemini API Key",
+        type="password",
+        placeholder="Masukkan API Key Anda...",
+        help="Dapatkan gratis di aistudio.google.com"
+    )
 
 if uploaded_file is not None:
     try:
