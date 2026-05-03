@@ -7,3 +7,4 @@ google-genai
 plotly
 openpyxl
 jinja2
+matplotlib
