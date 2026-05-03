@@ -341,7 +341,7 @@ Jawab HANYA dengan JSON valid, tanpa markdown/backtick.
 
             mode_peta = st.radio(
                 "Mode Tampilan Peta:",
-                ["🗺️ 2D Interaktif", "🏔️ 3D Globe (Elevasi)"],
+                ["🗺️ 2D Interaktif", "🏔️ Visualisasi 3D Elevasi & APBN"],
                 horizontal=True
             )
 
@@ -354,76 +354,95 @@ Jawab HANYA dengan JSON valid, tanpa markdown/backtick.
                         <p style='margin:4px 0'><b>📍</b> {row['Kecamatan']}</p>
                         <hr style='margin:6px 0'>
                         <p style='margin:2px 0'>⚡ Potensi: <b>{row['Potensi_MW']} MW</b></p>
-                        <p style='margin:2px 0'>💰 Investasi Awal: <b>Rp {row['Investasi_M_IDR']} M/MW</b></p>
-                        <p style='margin:2px 0'>📅 Waktu Optimal: <b>{row['Waktu_Optimal']}</b></p>
+                        <p style='margin:2px 0'>💰 Investasi: <b>Rp {row['Investasi_M_IDR']} M/MW</b></p>
+                        <p style='margin:2px 0'>📅 Waktu: <b>{row['Waktu_Optimal']}</b></p>
                         <p style='margin:2px 0'>🏛️ APBN: <b>{row['APBN_Tahap']}</b></p>
-                        <p style='margin:4px 0;font-size:11px;color:#888'>{row['Alasan']}</p>
                     </div>
                     """
                     folium.Marker(
                         location=[row['Lat'], row['Lon']],
                         popup=folium.Popup(popup_html, max_width=260),
-                        tooltip=f"{row['Teknologi']} — {row['Potensi_MW']} MW | Klik untuk detail",
                         icon=folium.Icon(color=row['Color'], icon=row['Icon'], prefix='fa')
                     ).add_to(m)
                 st_folium(m, width=None, height=480, use_container_width=True)
 
             else:
-                # 3D Globe menggunakan Plotly scatter_3d dengan elevasi
+                # --- VISUALISASI 3D IMPROVED ---
                 fig_3d = go.Figure()
 
-                # Latar belakang kontur wilayah (scatter sederhana)
                 color_map = {
-                    "PLTMH (Air)": "#29b6f6",
-                    "PLTS (Surya)": "#ffa726",
-                    "PLTB (Angin)": "#66bb6a",
-                    "Biomassa": "#ef5350"
+                    "PLTMH (Air)": "#29b6f6", "PLTS (Surya)": "#ffa726",
+                    "PLTB (Angin)": "#66bb6a", "Biomassa": "#ef5350"
                 }
+
                 for _, row in df_lokasi.iterrows():
                     color = color_map.get(row['Teknologi'], "#ffffff")
+                    
+                    # 1. Tambahkan Garis Stem (Garis dari titik ke dasar z=0)
+                    # Ini membantu mata melihat perbandingan ketinggian secara presisi
                     fig_3d.add_trace(go.Scatter3d(
-                        x=[row['Lon']],
-                        y=[row['Lat']],
-                        z=[row['Elevasi']],
+                        x=[row['Lon'], row['Lon']],
+                        y=[row['Lat'], row['Lat']],
+                        z=[0, row['Elevasi']],
+                        mode='lines',
+                        line=dict(color=color, width=3),
+                        showlegend=False,
+                        hoverinfo='none'
+                    ))
+
+                    # 2. Tambahkan Marker (Titik Potensi)
+                    fig_3d.add_trace(go.Scatter3d(
+                        x=[row['Lon']], y=[row['Lat']], z=[row['Elevasi']],
                         mode='markers+text',
                         marker=dict(
-                            size=row['Potensi_MW'] * 0.8,  # ukuran = fungsi potensi
+                            size=row['Potensi_MW'] * 1.2, # Ukuran berdasarkan Potensi
                             color=color,
-                            opacity=0.85,
-                            symbol='circle',
+                            opacity=0.9,
                             line=dict(color='white', width=1)
                         ),
-                        text=[f"{row['Teknologi']}<br>{row['Potensi_MW']} MW"],
-                        textposition='top center',
+                        text=[f"<b>{row['Teknologi']}</b><br>{row['Potensi_MW']} MW"],
+                        textposition="top center",
+                        name=row['Teknologi'],
                         hovertemplate=(
                             f"<b>{row['Teknologi']}</b><br>"
-                            f"📍 {row['Kecamatan']}<br>"
-                            f"⚡ {row['Potensi_MW']} MW<br>"
-                            f"💰 Rp {row['Investasi_M_IDR']} M/MW<br>"
-                            f"📅 {row['Waktu_Optimal']}<br>"
-                            f"🏛️ {row['APBN_Tahap']}<extra></extra>"
-                        ),
-                        name=row['Teknologi']
+                            f"Kecamatan: {row['Kecamatan']}<br>"
+                            f"Elevasi: {row['Elevasi']} m<br>"
+                            f"Investasi: Rp {row['Investasi_M_IDR']} M/MW<br>"
+                            f"APBN: {row['APBN_Tahap']}<br>"
+                            f"Jendela Konstruksi: {row['Waktu_Optimal']}<extra></extra>"
+                        )
                     ))
+
+                # 3. Tambahkan Dasar Grid (Sirkuit / Ground Plane)
+                # Memberikan kesan geografis dasar di elevasi 0
+                grid_lon = np.linspace(df_lokasi['Lon'].min()-0.05, df_lokasi['Lon'].max()+0.05, 10)
+                grid_lat = np.linspace(df_lokasi['Lat'].min()-0.05, df_lokasi['Lat'].max()+0.05, 10)
+                grid_z = np.zeros((10, 10))
+                
+                fig_3d.add_trace(go.Surface(
+                    x=grid_lon, y=grid_lat, z=grid_z,
+                    showscale=False, opacity=0.2, colorscale='Blues',
+                    hoverinfo='skip'
+                ))
 
                 fig_3d.update_layout(
                     scene=dict(
-                        xaxis_title="Longitude",
-                        yaxis_title="Latitude",
-                        zaxis_title="Elevasi (m)",
-                        bgcolor="rgb(10,15,30)",
-                        xaxis=dict(gridcolor="#1e3a5f", backgroundcolor="rgb(10,15,30)"),
-                        yaxis=dict(gridcolor="#1e3a5f", backgroundcolor="rgb(10,15,30)"),
-                        zaxis=dict(gridcolor="#1e3a5f", backgroundcolor="rgb(10,15,30)"),
-                        camera=dict(eye=dict(x=1.5, y=-2.0, z=1.2))
+                        xaxis=dict(title="Longitude", gridcolor="#1e3a5f", backgroundcolor="rgb(5,10,25)"),
+                        yaxis=dict(title="Latitude", gridcolor="#1e3a5f", backgroundcolor="rgb(5,10,25)"),
+                        zaxis=dict(title="Elevasi (m)", gridcolor="#1e3a5f", backgroundcolor="rgb(5,10,25)", range=[0, 500]),
+                        aspectmode='manual',
+                        aspectratio=dict(x=1, y=1, z=0.5), # Z diperpendek agar tidak terlalu tinggi
+                        camera=dict(eye=dict(x=1.8, y=-1.8, z=1))
                     ),
                     template="plotly_dark",
-                    height=520,
-                    title="Visualisasi 3D — Ukuran marker = Potensi MW, Tinggi = Elevasi",
-                    legend=dict(x=0, y=1)
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    height=600,
+                    title="Visualisasi 3D Terintegrasi (Tinggi=Elevasi, Ukuran=Kapasitas MW)"
                 )
                 st.plotly_chart(fig_3d, use_container_width=True)
-                st.caption("💡 Klik & drag untuk memutar. Scroll untuk zoom. Hover untuk detail.")
+                st.caption("🏔️ **Interpretasi 3D:** Garis vertikal menunjukkan ketinggian lokasi di atas permukaan laut. Marker yang lebih besar menunjukkan kapasitas energi yang lebih dominan.")
+
+        
 
             # ---- Tabel Detail Investasi & APBN ----
             st.divider()
