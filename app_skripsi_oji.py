@@ -11,7 +11,7 @@ import json
 # ==========================================
 # KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Dashboard Rencana Skenario EBT Kulon Progo, layout="wide")
+st.set_page_config(page_title="Dashboard Rencana Skenario EBT Kulon Progo", layout="wide")
 
 st.title("⚡ Dashboard Analisis Potensi EBT & MCDM Kabupaten Kulon Progo")
 st.markdown("**Oleh: Muhammad Fachrurrozy (Teknik Fisika UGM)**")
