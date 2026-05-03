@@ -196,7 +196,7 @@ if uploaded_file is not None:
                 else:
                     try:
                         genai.configure(api_key=api_key)
-                        model_ai = genai.GenerativeModel('gemini-1.5-pro')
+                        model_ai = genai.GenerativeModel('gemini-pro')
 
                         prompt_ai = f"""
 Anda adalah ahli transisi energi dan penasihat strategis untuk Pemerintah Kabupaten Kulon Progo.
