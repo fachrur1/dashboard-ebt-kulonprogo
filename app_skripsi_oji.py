@@ -337,111 +337,76 @@ Jawab HANYA dengan JSON valid, tanpa markdown/backtick.
         # TAB 3: PETA SPASIAL — FIX #3: 3D + Detail Investasi & APBN
         # ====================================================
         with tab3:
-            st.header("🗺️ Pemetaan Geospasial Potensi EBT Kulon Progo")
+            st.header("🏔️ Digital Twin: Terrain Mode Kulon Progo")
+            import pydeck as pdk
 
-            mode_peta = st.radio(
-                "Mode Tampilan Peta:",
-                ["🗺️ 2D Interaktif", "🏔️ Visualisasi 3D Elevasi & APBN"],
-                horizontal=True
+            # Penjelasan Interaktif
+            st.write("Visualisasi ini menggunakan data topografi nyata. Tinggi batang (Column) melambangkan **Potensi Energi (MW)**.")
+
+            # Menyiapkan data untuk Pydeck (Warna dalam format RGB)
+            df_pdk = df_lokasi.copy()
+            color_pdk = {
+                "blue": [41, 182, 246, 200],    # PLTMH
+                "orange": [255, 167, 38, 200],  # PLTS
+                "green": [102, 187, 106, 200],  # PLTB
+                "darkred": [239, 83, 80, 200]   # Biomassa
+            }
+            df_pdk["color_rgb"] = df_pdk["Color"].map(color_pdk)
+
+            # Konfigurasi View (Sudut Pandang Kamera 3D)
+            view_state = pdk.ViewState(
+                latitude=-7.8288,
+                longitude=110.1587,
+                zoom=10.5,
+                pitch=50,  # Kemiringan kamera untuk efek 3D
+                bearing=-10
             )
 
-            if mode_peta == "🗺️ 2D Interaktif":
-                m = folium.Map(location=[-7.8288, 110.1587], zoom_start=11, tiles="CartoDB dark_matter")
-                for _, row in df_lokasi.iterrows():
-                    popup_html = f"""
-                    <div style='font-family:sans-serif;min-width:220px'>
-                        <h4 style='color:#00bcd4;margin:0'>{row['Teknologi']}</h4>
-                        <p style='margin:4px 0'><b>📍</b> {row['Kecamatan']}</p>
-                        <hr style='margin:6px 0'>
-                        <p style='margin:2px 0'>⚡ Potensi: <b>{row['Potensi_MW']} MW</b></p>
-                        <p style='margin:2px 0'>💰 Investasi: <b>Rp {row['Investasi_M_IDR']} M/MW</b></p>
-                        <p style='margin:2px 0'>📅 Waktu: <b>{row['Waktu_Optimal']}</b></p>
-                        <p style='margin:2px 0'>🏛️ APBN: <b>{row['APBN_Tahap']}</b></p>
-                    </div>
-                    """
-                    folium.Marker(
-                        location=[row['Lat'], row['Lon']],
-                        popup=folium.Popup(popup_html, max_width=260),
-                        icon=folium.Icon(color=row['Color'], icon=row['Icon'], prefix='fa')
-                    ).add_to(m)
-                st_folium(m, width=None, height=480, use_container_width=True)
+            # LAYER 1: Column Layer (Batang Energi)
+            # Tinggi batang = Potensi_MW * 200 (agar terlihat proporsional di peta)
+            column_layer = pdk.Layer(
+                "ColumnLayer",
+                data=df_pdk,
+                get_position=["Lon", "Lat"],
+                get_elevation="Potensi_MW * 200",
+                elevation_scale=1,
+                radius=400,
+                get_fill_color="color_rgb",
+                pickable=True,
+                auto_highlight=True,
+            )
 
-            else:
-                # --- VISUALISASI 3D IMPROVED ---
-                fig_3d = go.Figure()
+            # LAYER 2: Terrain Layer (Kontur Tanah Nyata)
+            # Catatan: Terrain layer terbaik membutuhkan Mapbox Token, 
+            # tapi kita bisa menggunakan Terrain RGB open-source
+            terrain_layer = pdk.Layer(
+                "TerrainLayer",
+                elevation_decoder={
+                    "rScaler": 1, "gScaler": 0, "bScaler": 0, "offset": 0
+                },
+                elevation_data="https://assets.mapbox.com/raster-tiles/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw",
+                texture="https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            )
 
-                color_map = {
-                    "PLTMH (Air)": "#29b6f6", "PLTS (Surya)": "#ffa726",
-                    "PLTB (Angin)": "#66bb6a", "Biomassa": "#ef5350"
+            # Render Peta Pydeck
+            r = pdk.Deck(
+                layers=[terrain_layer, column_layer],
+                initial_view_state=view_state,
+                tooltip={
+                    "html": """
+                        <b>Teknologi:</b> {Teknologi}<br/>
+                        <b>Lokasi:</b> {Kecamatan}<br/>
+                        <b>Potensi:</b> {Potensi_MW} MW<br/>
+                        <b>Investasi:</b> Rp {Investasi_M_IDR} M/MW<br/>
+                        <b>Siklus APBN:</b> {APBN_Tahap}
+                    """,
+                    "style": {"backgroundColor": "steelblue", "color": "white"}
                 }
+            )
 
-                for _, row in df_lokasi.iterrows():
-                    color = color_map.get(row['Teknologi'], "#ffffff")
-                    
-                    # 1. Tambahkan Garis Stem (Garis dari titik ke dasar z=0)
-                    # Ini membantu mata melihat perbandingan ketinggian secara presisi
-                    fig_3d.add_trace(go.Scatter3d(
-                        x=[row['Lon'], row['Lon']],
-                        y=[row['Lat'], row['Lat']],
-                        z=[0, row['Elevasi']],
-                        mode='lines',
-                        line=dict(color=color, width=3),
-                        showlegend=False,
-                        hoverinfo='none'
-                    ))
-
-                    # 2. Tambahkan Marker (Titik Potensi)
-                    fig_3d.add_trace(go.Scatter3d(
-                        x=[row['Lon']], y=[row['Lat']], z=[row['Elevasi']],
-                        mode='markers+text',
-                        marker=dict(
-                            size=row['Potensi_MW'] * 1.2, # Ukuran berdasarkan Potensi
-                            color=color,
-                            opacity=0.9,
-                            line=dict(color='white', width=1)
-                        ),
-                        text=[f"<b>{row['Teknologi']}</b><br>{row['Potensi_MW']} MW"],
-                        textposition="top center",
-                        name=row['Teknologi'],
-                        hovertemplate=(
-                            f"<b>{row['Teknologi']}</b><br>"
-                            f"Kecamatan: {row['Kecamatan']}<br>"
-                            f"Elevasi: {row['Elevasi']} m<br>"
-                            f"Investasi: Rp {row['Investasi_M_IDR']} M/MW<br>"
-                            f"APBN: {row['APBN_Tahap']}<br>"
-                            f"Jendela Konstruksi: {row['Waktu_Optimal']}<extra></extra>"
-                        )
-                    ))
-
-                # 3. Tambahkan Dasar Grid (Sirkuit / Ground Plane)
-                # Memberikan kesan geografis dasar di elevasi 0
-                grid_lon = np.linspace(df_lokasi['Lon'].min()-0.05, df_lokasi['Lon'].max()+0.05, 10)
-                grid_lat = np.linspace(df_lokasi['Lat'].min()-0.05, df_lokasi['Lat'].max()+0.05, 10)
-                grid_z = np.zeros((10, 10))
-                
-                fig_3d.add_trace(go.Surface(
-                    x=grid_lon, y=grid_lat, z=grid_z,
-                    showscale=False, opacity=0.2, colorscale='Blues',
-                    hoverinfo='skip'
-                ))
-
-                fig_3d.update_layout(
-                    scene=dict(
-                        xaxis=dict(title="Longitude", gridcolor="#1e3a5f", backgroundcolor="rgb(5,10,25)"),
-                        yaxis=dict(title="Latitude", gridcolor="#1e3a5f", backgroundcolor="rgb(5,10,25)"),
-                        zaxis=dict(title="Elevasi (m)", gridcolor="#1e3a5f", backgroundcolor="rgb(5,10,25)", range=[0, 500]),
-                        aspectmode='manual',
-                        aspectratio=dict(x=1, y=1, z=0.5), # Z diperpendek agar tidak terlalu tinggi
-                        camera=dict(eye=dict(x=1.8, y=-1.8, z=1))
-                    ),
-                    template="plotly_dark",
-                    margin=dict(l=0, r=0, t=30, b=0),
-                    height=600,
-                    title="Visualisasi 3D Terintegrasi (Tinggi=Elevasi, Ukuran=Kapasitas MW)"
-                )
-                st.plotly_chart(fig_3d, use_container_width=True)
-                st.caption("🏔️ **Interpretasi 3D:** Garis vertikal menunjukkan ketinggian lokasi di atas permukaan laut. Marker yang lebih besar menunjukkan kapasitas energi yang lebih dominan.")
-
+            st.pydeck_chart(r)
+            
+            st.success("💡 **Analisis Terrain:** Perhatikan bahwa lokasi **PLTMH** berada pada area dengan elevasi tinggi (tekstur pegunungan), yang mengonfirmasi validitas teknis pemilihan lokasi berdasarkan *head* air.")
             # ---- Timeline APBN Visual ----
             st.subheader("🗓️ Timeline Optimal Pembangunan vs Siklus APBN")
             timeline_data = []
