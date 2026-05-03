@@ -57,7 +57,7 @@ if uploaded_file is not None:
             noise = np.random.normal(0, base_val * 0.05, len(range_bulan))
             data_ml_bulan[col] = tren + seasonality + noise
 
-        data_5_tahun = data_ml_bulan.resample('5AS').mean()
+        data_5_tahun = data_ml_bulan.resample('5YS').mean()
         data_5_tahun.index = data_5_tahun.index.year 
         
         col_chart1, col_chart2 = st.columns(2)
