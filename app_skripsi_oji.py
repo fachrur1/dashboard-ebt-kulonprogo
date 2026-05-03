@@ -188,36 +188,39 @@ if uploaded_file is not None:
             # ✅ FIX 6: Pindahkan ke indentasi yang benar (bagian dari tab2, bukan di dalam with col_res2)
             st.divider()
             st.subheader("🤖 AI Executive Summary")
-            st.write("Klik tombol di bawah ini untuk meminta AI menganalisis hasil MCDM secara otomatis.")
+            st.write("Klik tombol di bawah ini untuk analisis otomatis.")
 
             if st.button("✨ Generate AI Insight"):
                 if not api_key:
-                    st.warning("⚠️ Silakan masukkan API Key Gemini di sidebar terlebih dahulu.")
+                    st.warning("⚠️ Masukkan API Key di sidebar.")
                 else:
                     try:
                         genai.configure(api_key=api_key)
-                        model_ai = genai.GenerativeModel('gemini-pro')
+                        
+                        # LOGIKA AUTO-DETECT MODEL: Mencari model yang mendukung 'generateContent'
+                        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                        
+                        # Pilih model terbaik yang tersedia (prioritas Flash/Pro)
+                        target_model = 'models/gemini-1.5-flash' # Default 2026
+                        if target_model not in available_models:
+                            target_model = available_models[0] # Ambil apa saja yang tersedia
+                        
+                        model_ai = genai.GenerativeModel(target_model)
 
                         prompt_ai = f"""
-Anda adalah ahli transisi energi dan penasihat strategis untuk Pemerintah Kabupaten Kulon Progo.
-Tugas Anda adalah memberikan interpretasi naratif berdasarkan data analisis matematis (MCDM) berikut.
+Anda adalah ahli transisi energi Pemerintah Kabupaten Kulon Progo.
+Berikan interpretasi strategis berdasarkan data MCDM ini:
+- Target: {tahun_evaluasi}, Skenario: {kebijakan}, Inflasi: {inflasi * 100:.1f}%
+- Hasil Skor: {hasil_df.to_string()}
 
-Konteks Data Saat Ini:
-- Target Tahun Evaluasi: {tahun_evaluasi}
-- Skenario Kebijakan: {kebijakan}
-- Tingkat Inflasi: {inflasi * 100:.1f}%
-
-Hasil Peringkat Prioritas EBT (Skor tertinggi adalah yang terbaik):
-{hasil_df.to_string()}
-
-Berdasarkan data di atas, buatkan analisis 3 paragraf singkat dan profesional:
-1. Penjelasan mengapa teknologi peringkat 1 menjadi pemenang (kaitkan dengan skenario kebijakan yang sedang aktif).
-2. Analisis terhadap perubahan grafik (misalnya, jika inflasi/kebijakan memengaruhi kelayakan investasi EBT lainnya).
-3. Rekomendasi strategis untuk pembuat kebijakan di Kabupaten Kulon Progo.
+Buat 3 paragraf profesional: 
+1. Mengapa {hasil_df.index[0]} menang? 
+2. Analisis dampak ekonomi/inflasi. 
+3. Rekomendasi kebijakan.
 """
-                        with st.spinner("AI sedang menganalisis data..."):
+                        with st.spinner(f"AI ({target_model}) sedang menganalisis..."):
                             response = model_ai.generate_content(prompt_ai)
-                            st.success("✅ Analisis Selesai!")
+                            st.success(f"✅ Analisis Selesai (via {target_model})")
                             st.info(response.text)
 
                     except Exception as e:
