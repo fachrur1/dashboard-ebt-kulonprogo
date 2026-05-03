@@ -341,12 +341,13 @@ Jawab HANYA dengan JSON valid, tanpa markdown/backtick.
 
             mode_peta = st.radio(
                 "Mode Tampilan Peta:",
-                ["🗺️ 2D Interaktif", "🏔️ Visualisasi 3D Elevasi & APBN"],
+                ["🗺️ 2D Interaktif (Peta Normal)", "🏔️ Visualisasi 3D (Elevasi & Peta Dasar)"],
                 horizontal=True
             )
 
-            if mode_peta == "🗺️ 2D Interaktif":
-                m = folium.Map(location=[-7.8288, 110.1587], zoom_start=11, tiles="CartoDB dark_matter")
+            if mode_peta == "🗺️ 2D Interaktif (Peta Normal)":
+                # FIX 1: Mengganti 'CartoDB dark_matter' menjadi 'OpenStreetMap' agar peta normal (terang)
+                m = folium.Map(location=[-7.8288, 110.1587], zoom_start=11, tiles="OpenStreetMap")
                 for _, row in df_lokasi.iterrows():
                     popup_html = f"""
                     <div style='font-family:sans-serif;min-width:220px'>
@@ -367,82 +368,104 @@ Jawab HANYA dengan JSON valid, tanpa markdown/backtick.
                 st_folium(m, width=None, height=480, use_container_width=True)
 
             else:
-                # --- VISUALISASI 3D IMPROVED ---
-                fig_3d = go.Figure()
-
-                color_map = {
-                    "PLTMH (Air)": "#29b6f6", "PLTS (Surya)": "#ffa726",
-                    "PLTB (Angin)": "#66bb6a", "Biomassa": "#ef5350"
+                # FIX 2: Menggunakan Pydeck untuk 3D dengan peta asli di dasarnya
+                # Konversi warna teks ke format RGB untuk Pydeck
+                color_pdk = {
+                    "blue": [41, 182, 246, 200],    # PLTMH
+                    "orange": [255, 167, 38, 200],  # PLTS
+                    "green": [102, 187, 106, 200],  # PLTB
+                    "darkred": [239, 83, 80, 200]   # Biomassa
                 }
+                df_3d = df_lokasi.copy()
+                df_3d["color_rgb"] = df_3d["Color"].map(color_pdk)
 
-                for _, row in df_lokasi.iterrows():
-                    color = color_map.get(row['Teknologi'], "#ffffff")
-                    
-                    # 1. Tambahkan Garis Stem (Garis dari titik ke dasar z=0)
-                    # Ini membantu mata melihat perbandingan ketinggian secara presisi
-                    fig_3d.add_trace(go.Scatter3d(
-                        x=[row['Lon'], row['Lon']],
-                        y=[row['Lat'], row['Lat']],
-                        z=[0, row['Elevasi']],
-                        mode='lines',
-                        line=dict(color=color, width=3),
-                        showlegend=False,
-                        hoverinfo='none'
-                    ))
-
-                    # 2. Tambahkan Marker (Titik Potensi)
-                    fig_3d.add_trace(go.Scatter3d(
-                        x=[row['Lon']], y=[row['Lat']], z=[row['Elevasi']],
-                        mode='markers+text',
-                        marker=dict(
-                            size=row['Potensi_MW'] * 1.2, # Ukuran berdasarkan Potensi
-                            color=color,
-                            opacity=0.9,
-                            line=dict(color='white', width=1)
-                        ),
-                        text=[f"<b>{row['Teknologi']}</b><br>{row['Potensi_MW']} MW"],
-                        textposition="top center",
-                        name=row['Teknologi'],
-                        hovertemplate=(
-                            f"<b>{row['Teknologi']}</b><br>"
-                            f"Kecamatan: {row['Kecamatan']}<br>"
-                            f"Elevasi: {row['Elevasi']} m<br>"
-                            f"Investasi: Rp {row['Investasi_M_IDR']} M/MW<br>"
-                            f"APBN: {row['APBN_Tahap']}<br>"
-                            f"Jendela Konstruksi: {row['Waktu_Optimal']}<extra></extra>"
-                        )
-                    ))
-
-                # 3. Tambahkan Dasar Grid (Sirkuit / Ground Plane)
-                # Memberikan kesan geografis dasar di elevasi 0
-                grid_lon = np.linspace(df_lokasi['Lon'].min()-0.05, df_lokasi['Lon'].max()+0.05, 10)
-                grid_lat = np.linspace(df_lokasi['Lat'].min()-0.05, df_lokasi['Lat'].max()+0.05, 10)
-                grid_z = np.zeros((10, 10))
-                
-                fig_3d.add_trace(go.Surface(
-                    x=grid_lon, y=grid_lat, z=grid_z,
-                    showscale=False, opacity=0.2, colorscale='Blues',
-                    hoverinfo='skip'
-                ))
-
-                fig_3d.update_layout(
-                    scene=dict(
-                        xaxis=dict(title="Longitude", gridcolor="#1e3a5f", backgroundcolor="rgb(5,10,25)"),
-                        yaxis=dict(title="Latitude", gridcolor="#1e3a5f", backgroundcolor="rgb(5,10,25)"),
-                        zaxis=dict(title="Elevasi (m)", gridcolor="#1e3a5f", backgroundcolor="rgb(5,10,25)", range=[0, 500]),
-                        aspectmode='manual',
-                        aspectratio=dict(x=1, y=1, z=0.5), # Z diperpendek agar tidak terlalu tinggi
-                        camera=dict(eye=dict(x=1.8, y=-1.8, z=1))
-                    ),
-                    template="plotly_dark",
-                    margin=dict(l=0, r=0, t=30, b=0),
-                    height=600,
-                    title="Visualisasi 3D Terintegrasi (Tinggi=Elevasi, Ukuran=Kapasitas MW)"
+                # Sudut pandang kamera 3D
+                view_state = pdk.ViewState(
+                    latitude=-7.8288, longitude=110.1587,
+                    zoom=10, pitch=45, bearing=15
                 )
-                st.plotly_chart(fig_3d, use_container_width=True)
-                st.caption("🏔️ **Interpretasi 3D:** Garis vertikal menunjukkan ketinggian lokasi di atas permukaan laut. Marker yang lebih besar menunjukkan kapasitas energi yang lebih dominan.")
 
-    
+                # Layer Tiang 3D (ColumnLayer)
+                column_layer = pdk.Layer(
+                    "ColumnLayer",
+                    data=df_3d,
+                    get_position=["Lon", "Lat"],
+                    get_elevation="Elevasi",  # Tinggi tiang berdasarkan elevasi
+                    elevation_scale=5,        # Skala agar elevasi terlihat menonjol
+                    radius=500,               # Lebar/besarnya tiang
+                    get_fill_color="color_rgb",
+                    pickable=True,
+                    auto_highlight=True,
+                )
+
+                # Render Deck dengan Peta Normal (light map_style) di dasarnya
+                r = pdk.Deck(
+                    layers=[column_layer],
+                    initial_view_state=view_state,
+                    map_style="light",  # Menampilkan peta jalan normal di dasar
+                    tooltip={
+                        "html": "<b>{Teknologi}</b><br/>📍 {Kecamatan}<br/>🏔️ Elevasi: {Elevasi} m<br/>⚡ Potensi: {Potensi_MW} MW<br/>💰 Investasi: Rp {Investasi_M_IDR} M/MW",
+                        "style": {"backgroundColor": "#1e3a5f", "color": "white", "font-family": "sans-serif"}
+                    }
+                )
+
+                st.pydeck_chart(r, use_container_width=True)
+                st.caption("🏔️ **Interpretasi 3D:** Tiang menunjukkan lokasi energi. Semakin tinggi tiang, semakin tinggi elevasi lokasinya (contoh: PLTMH di Menoreh sangat tinggi dibanding PLTS di Wates). Geser dengan **Klik Kanan + Drag** untuk memutar peta.")
+
+            # ---- Tabel Detail Investasi & APBN ----
+            st.divider()
+            st.subheader("📋 Detail Potensi, Investasi & Jadwal APBN")
+
+            df_display = df_lokasi[[
+                "Teknologi", "Kecamatan", "Potensi_MW",
+                "Investasi_M_IDR", "Waktu_Optimal", "APBN_Tahap", "Alasan"
+            ]].copy()
+            df_display.columns = [
+                "Teknologi", "Lokasi", "Potensi (MW)",
+                "Investasi Awal (Rp M/MW)", "Waktu Terbaik", "Siklus APBN", "Pertimbangan"
+            ]
+
+            st.dataframe(
+                df_display.style
+                .background_gradient(subset=["Potensi (MW)"], cmap="Blues")
+                .background_gradient(subset=["Investasi Awal (Rp M/MW)"], cmap="Oranges"),
+                use_container_width=True, height=220
+            )
+
+            # ---- Timeline APBN Visual ----
+            st.subheader("🗓️ Timeline Optimal Pembangunan vs Siklus APBN")
+            timeline_data = []
+            for _, r in df_lokasi.iterrows():
+                start_y = int(r["Waktu_Optimal"].split("-")[0])
+                end_y   = int(r["Waktu_Optimal"].split("-")[1])
+                timeline_data.append({
+                    "Teknologi": f"{r['Teknologi']} ({r['Kecamatan'].split(' ')[0]})",
+                    "Mulai": start_y, "Selesai": end_y,
+                    "APBN": r["APBN_Tahap"],
+                    "MW": r["Potensi_MW"]
+                })
+            df_tl = pd.DataFrame(timeline_data)
+
+            fig_tl = px.timeline(
+                df_tl.assign(
+                    Mulai=pd.to_datetime(df_tl["Mulai"].astype(str) + "-01-01"),
+                    Selesai=pd.to_datetime(df_tl["Selesai"].astype(str) + "-12-31")
+                ),
+                x_start="Mulai", x_end="Selesai",
+                y="Teknologi", color="APBN",
+                hover_data=["MW"],
+                template="plotly_dark",
+                title="Jendela Pembangunan Optimal (sesuai Siklus RPJMN/APBN)",
+                color_discrete_sequence=["#4fc3f7", "#ff8a65"]
+            )
+            fig_tl.update_yaxes(autorange="reversed")
+            st.plotly_chart(fig_tl, use_container_width=True)
+
+            st.info(
+                "📍 **Catatan:** RPJMN 2025-2029 memprioritaskan proyek EBT skala kecil-menengah "
+                "yang shovel-ready. PLTB dan proyek pesisir masuk RPJMN 2030-2034 karena butuh "
+                "kajian lingkungan & sosial lebih panjang."
+            )
 
             # ---- Tabel Detail Investasi & APBN ----
             st.divider()
