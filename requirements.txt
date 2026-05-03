@@ -4,3 +4,4 @@ numpy
 openpyxl
 folium
 streamlit-folium
+google-generativeai
