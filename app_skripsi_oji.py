@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import folium
 from streamlit_folium import st_folium
+import google.generativeai as genai
 
 # Konfigurasi Halaman
 st.set_page_config(page_title="Dashboard EBT Kulon Progo - Oji", layout="wide")
@@ -27,6 +28,10 @@ kebijakan = st.sidebar.selectbox(
 )
 tahun_evaluasi = st.sidebar.slider("Tahun Target Evaluasi MCDM", 2025, 2060, 2060)
 selisih_tahun = tahun_evaluasi - 2025
+
+st.sidebar.divider()
+st.sidebar.header("🧠 3. Integrasi AI (Opsional)")
+api_key = st.sidebar.text_input("AIzaSyBrDiQwPA9yZa0vxiEZUaUEob8hRJx0478", type="password", help="Dapatkan di aistudio.google.com")
 
 if uploaded_file is not None:
     try:
@@ -114,6 +119,53 @@ if uploaded_file is not None:
             with col_res2:
                 st.success(f"**Pemenang Skenario:** {hasil_df.index[0]} dengan skor {hasil_df.iloc[0]['Skor Preferensi']:.3f}.")
 
+        # ==========================================
+            # FITUR BARU: GENERATIVE AI INSIGHT
+            # ==========================================
+            st.divider()
+            st.subheader("🤖 AI Executive Summary")
+            st.write("Klik tombol di bawah ini untuk meminta AI menganalisis perubahan grafik dan hasil MCDM secara otomatis.")
+            
+            if st.button("✨ Generate AI Insight"):
+                if not api_key:
+                    st.warning("⚠️ Silakan masukkan API Key Gemini di sidebar terlebih dahulu.")
+                else:
+                    try:
+                        # Mengonfigurasi AI
+                        genai.configure(api_key=api_key)
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        
+                        # Menyusun "Prompt" yang menyuapi AI dengan data dari Dashboard
+                        prompt_ai = f"""
+                        Anda adalah ahli transisi energi dan penasihat strategis untuk Pemerintah Kabupaten Kulon Progo.
+                        Tugas Anda adalah memberikan interpretasi naratif berdasarkan data analisis matematis (MCDM) berikut.
+                        
+                        Konteks Data Saat Ini:
+                        - Target Tahun Evaluasi: {tahun_evaluasi}
+                        - Skenario Kebijakan: {kebijakan}
+                        - Tingkat Inflasi: {inflasi*100}%
+                        
+                        Hasil Peringkat Prioritas EBT (Skor tertinggi adalah yang terbaik):
+                        {hasil_df.to_string()}
+                        
+                        Berdasarkan data di atas, buatkan analisis 3 paragraf singkat dan profesional:
+                        1. Penjelasan mengapa teknologi peringkat 1 menjadi pemenang (kaitkan dengan skenario kebijakan yang sedang aktif).
+                        2. Analisis terhadap perubahan grafik (misalnya, jika inflasi/kebijakan memengaruhi kelayakan investasi EBT lainnya).
+                        3. Rekomendasi strategis untuk pembuat kebijakan di Kabupaten Kulon Progo.
+                        """
+                        
+                        # Menampilkan efek loading saat AI berpikir
+                        with st.spinner('AI sedang menganalisis data dan menyusun kesimpulan...'):
+                            response = model.generate_content(prompt_ai)
+                            st.success("✅ Analisis Selesai!")
+                            
+                            # Menampilkan hasil teks AI dalam kotak yang rapi
+                            st.info(response.text)
+                            
+                    except Exception as e:
+                        st.error(f"Terjadi kesalahan pada AI: {e}")
+
+        
         # ---------------- TAB 3: PETA SPASIAL ----------------
         with tab3:
             st.header("🗺️ Pemetaan Geospasial Potensi EBT Kulon Progo")
