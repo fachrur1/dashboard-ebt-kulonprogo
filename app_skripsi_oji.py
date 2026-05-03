@@ -6,6 +6,7 @@ from streamlit_folium import st_folium
 from google import genai
 import plotly.express as px
 import plotly.graph_objects as go
+import pydeck as pdk
 import json
 
 # ==========================================
