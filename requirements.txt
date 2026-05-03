@@ -8,3 +8,4 @@ plotly
 openpyxl
 jinja2
 matplotlib
+pydeck
