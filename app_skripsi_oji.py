@@ -29,7 +29,7 @@ st.divider()
 # ==========================================
 st.sidebar.header("📂 1. Input Data Sistem")
 st.sidebar.caption("Support File: Excel manual (.xlsx) atau Raw NASA POWER (.csv)")
-uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv"])
+uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv", "json"])
 st.sidebar.divider()
 
 st.sidebar.header("🌍 2. Asumsi Makro & Kebijakan")
@@ -62,31 +62,38 @@ df_lokasi = pd.DataFrame([
 # ==========================================
 @st.cache_data
 def process_data_and_predict(file):
-    # 1. SMART PARSER: Membaca format NASA CSV atau Excel biasa
-    if file.name.endswith('.csv'):
-        raw_text = file.getvalue().decode("utf-8")
-        lines = raw_text.split('\n')
-        skip_rows = 0
+    # 1. SMART PARSER: Membaca format NASA JSON, CSV, atau Excel
+    if file.name.endswith('.json'):
+        import json
+        json_data = json.load(file)
         
-        # Mencari baris header otomatis (-END HEADER-)
-        for i, line in enumerate(lines):
-            if "-END HEADER-" in line or ("YEAR" in line and "MO" in line):
-                skip_rows = i + 1 if "-END HEADER-" in line else i
-                break
-                
-        df_raw = pd.read_csv(io.StringIO(raw_text), skiprows=skip_rows)
-        
-        # VALIDASI FILE: Pastikan ini benar-benar file data cuaca, bukan kamus NASA
-        if 'YEAR' not in df_raw.columns:
-            raise ValueError("File CSV yang diunggah sepertinya bukan data historis cuaca. Pastikan Anda mengunduh data 'Time Series' dari portal NASA POWER yang memiliki kolom 'YEAR', 'MO', 'DY'.")
+        # Navigasi ke dalam struktur JSON NASA POWER
+        params = json_data.get('properties', {}).get('parameter', {})
+        if not params:
+            raise ValueError("Format JSON tidak dikenali. Pastikan file berasal dari NASA POWER.")
             
-        # Membersihkan data null NASA (-999.0)
-        df_raw = df_raw.replace(-999.0, np.nan).ffill().bfill()
+        parsed_data = []
+        for param_name, param_values in params.items():
+            for date_key, value in param_values.items():
+                # NASA POWER format tanggal biasanya "YYYYMM" (contoh: "201001" untuk Jan 2010)
+                # Bulan "13" adalah data agregasi tahunan, kita skip agar tidak double.
+                if len(date_key) == 6:
+                    year = int(date_key[:4])
+                    month = int(date_key[4:])
+                    if month <= 12: 
+                        parsed_data.append({
+                            'Tahun': year,
+                            'Parameter': param_name,
+                            'Value': value if value != -999.0 else np.nan
+                        })
+                        
+        df_melted = pd.DataFrame(parsed_data)
+        # Menghitung rata-rata per tahun secara otomatis
+        df_raw = df_melted.pivot_table(index='Tahun', columns='Parameter', values='Value', aggfunc='mean')
+        df_raw = df_raw.ffill().bfill() # Bersihkan jika masih ada NaN
         
-        # Konversi Parameter NASA ke Potensi Daya (Faktor Ekstraksi Sederhana)
-        df_clean = pd.DataFrame()
-        df_clean['Tahun'] = df_raw['YEAR']
-        
+        # Konversi Parameter NASA ke Daya
+        df_clean = pd.DataFrame(index=df_raw.index)
         has_data = False
         if 'ALLSKY_SFC_SW_DWN' in df_raw.columns: 
             df_clean['PLTS (Surya)'] = df_raw['ALLSKY_SFC_SW_DWN'] * 3.5
@@ -99,19 +106,53 @@ def process_data_and_predict(file):
             has_data = True
             
         if not has_data:
-            raise ValueError("File CSV tidak mengandung parameter EBT yang dibutuhkan (seperti ALLSKY_SFC_SW_DWN, WS10M, atau PRECTOTCORR).")
+            raise ValueError("File JSON tidak mengandung parameter yang dibutuhkan (ALLSKY_SFC_SW_DWN, WS10M, PRECTOTCORR).")
             
-        # Agregasi Rata-rata per Tahun
+        data_input = df_clean
+
+    elif file.name.endswith('.csv'):
+        raw_text = file.getvalue().decode("utf-8")
+        lines = raw_text.split('\n')
+        skip_rows = 0
+        for i, line in enumerate(lines):
+            if "-END HEADER-" in line or ("YEAR" in line and "MO" in line):
+                skip_rows = i + 1 if "-END HEADER-" in line else i
+                break
+                
+        df_raw = pd.read_csv(io.StringIO(raw_text), skiprows=skip_rows)
+        if 'YEAR' not in df_raw.columns:
+            raise ValueError("Pastikan Anda mengunduh data 'Time Series' dengan kolom 'YEAR', 'MO'.")
+            
+        df_raw = df_raw.replace(-999.0, np.nan).ffill().bfill()
+        
+        df_clean = pd.DataFrame()
+        df_clean['Tahun'] = df_raw['YEAR']
+        has_data = False
+        if 'ALLSKY_SFC_SW_DWN' in df_raw.columns: 
+            df_clean['PLTS (Surya)'] = df_raw['ALLSKY_SFC_SW_DWN'] * 3.5
+            has_data = True
+        if 'WS10M' in df_raw.columns: 
+            df_clean['PLTB (Angin)'] = df_raw['WS10M'] * 2.8
+            has_data = True
+        if 'PRECTOTCORR' in df_raw.columns: 
+            df_clean['PLTMH (Air)'] = df_raw['PRECTOTCORR'] * 1.5
+            has_data = True
+            
+        if not has_data:
+            raise ValueError("File CSV tidak mengandung parameter EBT yang dibutuhkan.")
+            
         data_input = df_clean.groupby('Tahun').mean()
         
     else:
+        # Untuk format Excel .xlsx / .xls
         data_input = pd.read_excel(file)
         if "Tahun" in data_input.columns:
             data_input = data_input.set_index("Tahun")
 
+    # ==========================================
     # 2. MACHINE LEARNING (Linear Regression Forecasting)
+    # ==========================================
     X_train = np.array(data_input.index).reshape(-1, 1)
-    
     tahun_prediksi = np.arange(2025, 2061)
     X_pred = tahun_prediksi.reshape(-1, 1)
     
@@ -120,17 +161,13 @@ def process_data_and_predict(file):
     
     for col in data_input.columns:
         y_train = data_input[col].values
-        # Training Model
         model = LinearRegression()
         model.fit(X_train, y_train)
         models[col] = model
         
-        # Prediksi Tren Dasar
         tren_prediksi = model.predict(X_pred)
-        
-        # Menambahkan noise realistis (Siklus variasi alam)
         noise = np.random.normal(0, np.std(y_train) * 0.5, len(tahun_prediksi))
-        data_ml_tahunan[col] = np.maximum(0, tren_prediksi + noise) # Tidak boleh minus
+        data_ml_tahunan[col] = np.maximum(0, tren_prediksi + noise)
 
     return data_input, data_ml_tahunan
 
