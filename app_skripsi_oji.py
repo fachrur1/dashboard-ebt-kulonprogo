@@ -75,8 +75,7 @@ def process_data_and_predict(file):
                 break
                 
         df_raw = pd.read_csv(io.StringIO(raw_text), skiprows=skip_rows)
-        # Membersihkan data null NASA (-999.0)
-        df_raw = df_raw.replace(-999.0, np.nan).fillna(method='ffill').fillna(method='bfill')
+        df_raw = df_raw.replace(-999.0, np.nan).ffill().bfill()
         
         # Konversi Parameter NASA ke Potensi Daya (Faktor Ekstraksi Sederhana)
         # ALLSKY_SFC_SW_DWN (Irradiasi Surya), WS10M (Kecepatan Angin), PRECTOTCORR (Curah Hujan untuk Air)
