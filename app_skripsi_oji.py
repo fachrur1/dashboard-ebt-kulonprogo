@@ -75,19 +75,29 @@ def process_data_and_predict(file):
         parsed_data = []
         for param_name, param_values in params.items():
             for date_key, value in param_values.items():
-                # NASA POWER format tanggal biasanya "YYYYMM" (contoh: "201001" untuk Jan 2010)
-                # Bulan "13" adalah data agregasi tahunan, kita skip agar tidak double.
-                if len(date_key) == 6:
-                    year = int(date_key[:4])
-                    month = int(date_key[4:])
-                    if month <= 12: 
+                date_str = str(date_key)
+                
+                # Tangkap tahun dari 4 digit pertama (Bisa untuk Harian, Bulanan, Tahunan)
+                if len(date_str) >= 4:
+                    try:
+                        year = int(date_str[:4])
+                        # Jika format bulanan (6 digit), abaikan bulan ke-13 (NASA menggunakan bulan 13 sebagai rata-rata tahunan)
+                        if len(date_str) == 6 and int(date_str[4:]) > 12:
+                            continue
+                            
                         parsed_data.append({
                             'Tahun': year,
                             'Parameter': param_name,
                             'Value': value if value != -999.0 else np.nan
                         })
+                    except ValueError:
+                        continue # Abaikan jika key bukan angka
                         
+        if len(parsed_data) == 0:
+            raise ValueError("Tidak dapat menemukan format waktu yang valid di dalam file JSON.")
+            
         df_melted = pd.DataFrame(parsed_data)
+        
         # Menghitung rata-rata per tahun secara otomatis
         df_raw = df_melted.pivot_table(index='Tahun', columns='Parameter', values='Value', aggfunc='mean')
         df_raw = df_raw.ffill().bfill() # Bersihkan jika masih ada NaN
