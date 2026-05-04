@@ -44,15 +44,7 @@ tahun_evaluasi = st.sidebar.slider("Tahun Target Evaluasi", 2025, 2060, 2060)
 selisih_tahun = tahun_evaluasi - 2025
 st.sidebar.divider()
 
-# FIX: Menambahkan Slider Kalibrasi Fisika
-st.sidebar.header("⚙️ 3. Kalibrasi Ekstraksi Energi")
-st.sidebar.caption("Sesuaikan pengali dari data mentah cuaca (NASA) menjadi MW. Sesuai dengan Asumsi Luas Lahan & Efisiensi.")
-f_surya = st.sidebar.number_input("Faktor Konversi Surya (Luas x Efisiensi)", value=6.5, step=0.5, help="Menaikkan ini akan meningkatkan MW PLTS")
-f_angin = st.sidebar.number_input("Faktor Konversi Angin", value=2.8, step=0.1)
-f_air   = st.sidebar.number_input("Faktor Konversi Air (Head x Debit)", value=1.5, step=0.1)
-st.sidebar.divider()
-
-st.sidebar.header("🧠 4. Integrasi AI")
+st.sidebar.header("🧠 3. Integrasi AI")
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
     st.sidebar.success("✅ AI terhubung via Server Key.")
@@ -74,7 +66,12 @@ df_lokasi = pd.DataFrame([
 # FUNGSI SMART PARSER & MACHINE LEARNING
 # ==========================================
 @st.cache_data
-def process_data_and_predict(file, f_surya, f_angin, f_air):
+def process_data_and_predict(file):
+    # Konstanta konversi otomatis agar grafik langsung proporsional
+    f_surya = 12.0 
+    f_angin = 2.8
+    f_air = 1.5
+
     # 1. PARSER JSON
     if file.name.endswith('.json'):
         json_data = json.load(file)
@@ -157,7 +154,8 @@ def process_data_and_predict(file, f_surya, f_angin, f_air):
 # ==========================================
 if uploaded_file is not None:
     try:
-        data_historis, data_ml_tahunan = process_data_and_predict(uploaded_file, f_surya, f_angin, f_air)
+        # Pemanggilan fungsi secara langsung tanpa variabel kalibrasi
+        data_historis, data_ml_tahunan = process_data_and_predict(uploaded_file)
         data_5_tahun = data_ml_tahunan.groupby(data_ml_tahunan.index // 5 * 5).mean()
 
         tab1, tab2, tab3 = st.tabs(["📈 Prediksi ML", "⚖️ Keputusan MCDM", "🗺️ Terrain Spasial 3D"])
