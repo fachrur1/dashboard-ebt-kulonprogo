@@ -3,7 +3,11 @@ import pandas as pd
 import numpy as np
 import folium
 from streamlit_folium import st_folium
-from google import genai
+try:
+    from google import genai
+except ImportError:
+    st.error("Library google-genai belum terinstall. Silakan install via pip.")
+    st.stop()
 import plotly.express as px
 import plotly.graph_objects as go
 import json
@@ -31,13 +35,16 @@ if "ai_result_model" not in st.session_state:
     st.session_state.ai_result_model = None
 if "ai_chart_data" not in st.session_state:
     st.session_state.ai_chart_data = None
+if "use_dummy" not in st.session_state:
+    st.session_state.use_dummy = False
+if "data_dummy" not in st.session_state:
+    st.session_state.data_dummy = None
 
 # ==========================================
 # SIDEBAR
 # ==========================================
 st.sidebar.header("📂 1. Input Data Sistem")
 st.sidebar.caption("Support: Excel (.xlsx), NASA POWER Time Series (.csv/.json), atau NASA Climatology (.json)")
-uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv", "json"])
 
 # Tombol untuk generate data dummy
 if st.sidebar.button("🎲 Generate Contoh Data Dummy"):
@@ -52,14 +59,18 @@ if st.sidebar.button("🎲 Generate Contoh Data Dummy"):
         'Biomassa': [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.5, 1.6]
     }
     df_dummy = pd.DataFrame(data_dummy)
-    csv_dummy = df_dummy.to_csv(index=False).encode('utf-8')
     
-    st.session_state['dummy_file'] = csv_dummy
-    st.success("✅ Data dummy berhasil dibuat! Silakan download dan upload kembali, atau gunakan langsung.")
+    st.session_state['use_dummy'] = True
+    st.session_state['data_dummy'] = df_dummy
+    st.sidebar.success("✅ Data dummy berhasil dimuat! Silakan tutup pesan ini untuk melanjutkan.")
 
 st.sidebar.divider()
 
 uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv", "json"], key="mainUploader")
+
+# Jika file di-upload manual, matikan mode dummy
+if uploaded_file is not None:
+    st.session_state['use_dummy'] = False
 
 st.sidebar.header("🌍 2. Asumsi Makro & Kebijakan")
 inflasi = st.sidebar.number_input("Tingkat Inflasi Tahunan (%)", min_value=0.0, max_value=15.0, value=3.5, step=0.1) / 100
@@ -115,7 +126,7 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
             # NASA POWER GeoJSON Format
             NASA_MAP = {
                 "ALLSKY_SFC_SW_DWN": ("PLTS (Surya)", 0.0036),  # MJ/m²/day → MW (faktor konversi realistis)
-                "WS10M": ("PLTB (Angin)", 0.15),              # m/s → MW (faktor konversi realistis)
+                "WS10M": ("PLTB (Angin)", 0.15),                # m/s → MW (faktor konversi realistis)
                 "PRECTOTCORR": ("PLTMH (Air)", 0.05),          # mm/day → MW (faktor konversi realistis)
             }
             fill_val = raw_json.get("header", {}).get("fill_value", -999)
@@ -139,7 +150,7 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
                         ann_val = monthly["ANN"] * factor
                     else:
                         valid_vals = [v for k, v in monthly.items() 
-                                     if k not in ["ANN", "DJF", "MAM", "JJA", "SON"] and v != fill_val]
+                                      if k not in ["ANN", "DJF", "MAM", "JJA", "SON"] and v != fill_val]
                         ann_val = np.mean(valid_vals) * factor if valid_vals else 0
                     
                     # Bangun mock data historis (10 tahun) dengan variasi kecil
@@ -226,7 +237,11 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
                 df_clean[new_col] = df_raw[nasa_col] * factor
         
         if len(df_clean.columns) == 1:  # Hanya kolom Tahun
-            raise ValueError("Tidak ada parameter EBT yang ditemukan dalam CSV")
+            # Jika tidak ada header NASA, asumsikan ini csv biasa (misal dari generate dummy)
+            if 'PLTS (Surya)' in df_raw.columns:
+                df_clean = df_raw.copy()
+            else:
+                raise ValueError("Tidak ada parameter EBT yang ditemukan dalam CSV")
             
         data_input = df_clean.groupby('Tahun').mean()
 
@@ -421,7 +436,7 @@ if uploaded_file is not None or use_dummy_data:
                 x='Tahun', y='MW', color='Teknologi', line_dash='Tipe',
                 template='plotly_white',
                 markers=True,
-                title=f"Prediksi Potensi EBT per Teknologi (2015-{tahun_akhir})"
+                title=f"Prediksi Potensi EBT per Teknologi (2015-2060)" # <--- FIX DI SINI
             )
             fig_tren.add_vline(x=2025, line_dash='dot', line_color='red', annotation_text="Mulai Prediksi")
             fig_tren.update_layout(hovermode='x unified', yaxis_title="Potensi (MW)", xaxis_title="Tahun")
