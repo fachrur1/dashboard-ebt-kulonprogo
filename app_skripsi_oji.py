@@ -7,40 +7,35 @@ from google import genai
 import plotly.express as px
 import plotly.graph_objects as go
 import json
+import pydeck as pdk
+import io
+from sklearn.linear_model import LinearRegression
 
 # ==========================================
-# KONFIGURASI HALAMAN
+# KONFIGURASI HALAMAN & SESSION STATE
 # ==========================================
 st.set_page_config(page_title="Dashboard EBT Kulon Progo - Oji", layout="wide")
+
+if "ai_result_text" not in st.session_state: st.session_state.ai_result_text = None
+if "ai_result_model" not in st.session_state: st.session_state.ai_result_model = None
+if "ai_chart_data" not in st.session_state: st.session_state.ai_chart_data = None
 
 st.title("⚡ Dashboard Analisis Potensi EBT & MCDM Kabupaten Kulon Progo")
 st.markdown("**Oleh: Muhammad Fachrurrozy (Teknik Fisika UGM)**")
 st.divider()
 
 # ==========================================
-# SESSION STATE — FIX #1: AI summary tidak hilang saat pindah tab
-# ==========================================
-if "ai_result_text" not in st.session_state:
-    st.session_state.ai_result_text = None
-if "ai_result_model" not in st.session_state:
-    st.session_state.ai_result_model = None
-if "ai_chart_data" not in st.session_state:
-    st.session_state.ai_chart_data = None
-
-# ==========================================
 # SIDEBAR
 # ==========================================
 st.sidebar.header("📂 1. Input Data Sistem")
-uploaded_file = st.sidebar.file_uploader("Upload File Excel (.xlsx)", type=["xlsx", "xls"])
+st.sidebar.caption("Support File: Excel manual (.xlsx) atau Raw NASA POWER (.csv)")
+uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv"])
 st.sidebar.divider()
 
 st.sidebar.header("🌍 2. Asumsi Makro & Kebijakan")
-inflasi = st.sidebar.number_input("Tingkat Inflasi Tahunan (%)", min_value=0.0, max_value=15.0, value=3.5, step=0.1) / 100
-kebijakan = st.sidebar.selectbox(
-    "Skenario Kebijakan Transisi",
-    ["Business as Usual (BAU)", "Pajak Karbon Tinggi (Pro-Lingkungan)", "Subsidi Masif EBT (Pro-Ekonomi)"]
-)
-tahun_evaluasi = st.sidebar.slider("Tahun Target Evaluasi MCDM", 2025, 2060, 2060)
+inflasi = st.sidebar.number_input("Tingkat Inflasi Tahunan (%)", 0.0, 15.0, 3.5, 0.1) / 100
+kebijakan = st.sidebar.selectbox("Skenario Kebijakan", ["Business as Usual (BAU)", "Pajak Karbon Tinggi (Pro-Lingkungan)", "Subsidi Masif EBT (Pro-Ekonomi)"])
+tahun_evaluasi = st.sidebar.slider("Tahun Target Evaluasi", 2025, 2060, 2060)
 selisih_tahun = tahun_evaluasi - 2025
 st.sidebar.divider()
 
@@ -49,113 +44,120 @@ try:
     api_key = st.secrets["GEMINI_API_KEY"]
     st.sidebar.success("✅ AI terhubung via Server Key.")
 except Exception:
-    api_key = st.sidebar.text_input("Gemini API Key", type="password", placeholder="Masukkan API Key...", help="Dapatkan di aistudio.google.com")
+    api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 # ==========================================
-# DATA LOKASI EBT (dipakai di Tab 3)
+# DATA LOKASI EBT (Untuk Peta)
 # ==========================================
-LOKASI_EBT = [
-    {
-        "Teknologi": "PLTMH (Air)", "Kecamatan": "Girimulyo - Perbukitan Menoreh",
-        "Lat": -7.7470, "Lon": 110.1260, "Elevasi": 350,
-        "Potensi_MW": 8.5, "Investasi_M_IDR": 18.5, "Color": "blue", "Icon": "tint",
-        "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2026-2027",
-        "Alasan": "Debit sungai tinggi, infrastruktur jalan sudah ada."
-    },
-    {
-        "Teknologi": "PLTMH (Air)", "Kecamatan": "Samigaluh",
-        "Lat": -7.6710, "Lon": 110.1700, "Elevasi": 420,
-        "Potensi_MW": 6.2, "Investasi_M_IDR": 14.0, "Color": "blue", "Icon": "tint",
-        "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2027-2028",
-        "Alasan": "Perlu studi hidrologi lanjutan, akses jalan terbatas."
-    },
-    {
-        "Teknologi": "PLTS (Surya)", "Kecamatan": "Wates - Dataran Rendah",
-        "Lat": -7.8600, "Lon": 110.1400, "Elevasi": 15,
-        "Potensi_MW": 22.0, "Investasi_M_IDR": 28.0, "Color": "orange", "Icon": "sun",
-        "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2025-2026",
-        "Alasan": "Irradiasi matahari tinggi, lahan tersedia, dekat jaringan PLN."
-    },
-    {
-        "Teknologi": "PLTB (Angin)", "Kecamatan": "Temon / Pantai Glagah",
-        "Lat": -7.9150, "Lon": 110.0760, "Elevasi": 5,
-        "Potensi_MW": 15.0, "Investasi_M_IDR": 35.0, "Color": "green", "Icon": "cloud",
-        "APBN_Tahap": "RPJMN 2030-2034", "Waktu_Optimal": "2030-2032",
-        "Alasan": "Kecepatan angin laut stabil >5 m/s. Butuh kajian lingkungan pesisir."
-    },
-    {
-        "Teknologi": "Biomassa", "Kecamatan": "Sentolo / Nanggulan",
-        "Lat": -7.7840, "Lon": 110.2220, "Elevasi": 80,
-        "Potensi_MW": 4.5, "Investasi_M_IDR": 12.0, "Color": "darkred", "Icon": "leaf",
-        "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2028-2029",
-        "Alasan": "Limbah pertanian melimpah, perlu kemitraan petani lokal."
-    },
-]
-df_lokasi = pd.DataFrame(LOKASI_EBT)
+df_lokasi = pd.DataFrame([
+    {"Teknologi": "PLTMH (Air)", "Kecamatan": "Girimulyo", "Lat": -7.7470, "Lon": 110.1260, "Elevasi": 350, "Potensi_MW": 8.5, "Investasi_M_IDR": 18.5, "Color": "blue", "Icon": "tint", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2026-2027"},
+    {"Teknologi": "PLTMH (Air)", "Kecamatan": "Samigaluh", "Lat": -7.6710, "Lon": 110.1700, "Elevasi": 420, "Potensi_MW": 6.2, "Investasi_M_IDR": 14.0, "Color": "blue", "Icon": "tint", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2027-2028"},
+    {"Teknologi": "PLTS (Surya)", "Kecamatan": "Wates", "Lat": -7.8600, "Lon": 110.1400, "Elevasi": 15, "Potensi_MW": 22.0, "Investasi_M_IDR": 28.0, "Color": "orange", "Icon": "sun", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2025-2026"},
+    {"Teknologi": "PLTB (Angin)", "Kecamatan": "Pantai Glagah", "Lat": -7.9150, "Lon": 110.0760, "Elevasi": 5, "Potensi_MW": 15.0, "Investasi_M_IDR": 35.0, "Color": "green", "Icon": "cloud", "APBN_Tahap": "RPJMN 2030-2034", "Waktu_Optimal": "2030-2032"},
+    {"Teknologi": "Biomassa", "Kecamatan": "Sentolo", "Lat": -7.7840, "Lon": 110.2220, "Elevasi": 80, "Potensi_MW": 4.5, "Investasi_M_IDR": 12.0, "Color": "darkred", "Icon": "leaf", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2028-2029"}
+])
+
+# ==========================================
+# FUNGSI SMART PARSER & MACHINE LEARNING
+# ==========================================
+@st.cache_data
+def process_data_and_predict(file):
+    # 1. SMART PARSER: Membaca format NASA CSV atau Excel biasa
+    if file.name.endswith('.csv'):
+        raw_text = file.getvalue().decode("utf-8")
+        lines = raw_text.split('\n')
+        skip_rows = 0
+        
+        # Mencari baris header otomatis (-END HEADER-)
+        for i, line in enumerate(lines):
+            if "-END HEADER-" in line or ("YEAR" in line and "MO" in line):
+                skip_rows = i + 1 if "-END HEADER-" in line else i
+                break
+                
+        df_raw = pd.read_csv(io.StringIO(raw_text), skiprows=skip_rows)
+        # Membersihkan data null NASA (-999.0)
+        df_raw = df_raw.replace(-999.0, np.nan).fillna(method='ffill').fillna(method='bfill')
+        
+        # Konversi Parameter NASA ke Potensi Daya (Faktor Ekstraksi Sederhana)
+        # ALLSKY_SFC_SW_DWN (Irradiasi Surya), WS10M (Kecepatan Angin), PRECTOTCORR (Curah Hujan untuk Air)
+        df_clean = pd.DataFrame()
+        df_clean['Tahun'] = df_raw['YEAR']
+        if 'ALLSKY_SFC_SW_DWN' in df_raw.columns: df_clean['PLTS (Surya)'] = df_raw['ALLSKY_SFC_SW_DWN'] * 3.5
+        if 'WS10M' in df_raw.columns: df_clean['PLTB (Angin)'] = df_raw['WS10M'] * 2.8
+        if 'PRECTOTCORR' in df_raw.columns: df_clean['PLTMH (Air)'] = df_raw['PRECTOTCORR'] * 1.5
+        
+        # Agregasi Rata-rata per Tahun
+        data_input = df_clean.groupby('Tahun').mean()
+        
+    else:
+        data_input = pd.read_excel(file)
+        if "Tahun" in data_input.columns:
+            data_input = data_input.set_index("Tahun")
+
+    # 2. MACHINE LEARNING (Linear Regression Forecasting)
+    X_train = np.array(data_input.index).reshape(-1, 1)
+    
+    tahun_prediksi = np.arange(2025, 2061)
+    X_pred = tahun_prediksi.reshape(-1, 1)
+    
+    data_ml_tahunan = pd.DataFrame(index=tahun_prediksi)
+    models = {}
+    
+    for col in data_input.columns:
+        y_train = data_input[col].values
+        # Training Model
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+        models[col] = model
+        
+        # Prediksi Tren Dasar
+        tren_prediksi = model.predict(X_pred)
+        
+        # Menambahkan noise realistis (Siklus El Nino/La Nina)
+        noise = np.random.normal(0, np.std(y_train) * 0.5, len(tahun_prediksi))
+        data_ml_tahunan[col] = np.maximum(0, tren_prediksi + noise) # Tidak boleh minus
+
+    return data_input, data_ml_tahunan
 
 # ==========================================
 # MAIN CONTENT
 # ==========================================
 if uploaded_file is not None:
     try:
-        data_input = pd.read_excel(uploaded_file)
-        if "Tahun" in data_input.columns:
-            data_input = data_input.set_index("Tahun")
+        # Eksekusi AI Data Processing
+        data_historis, data_ml_tahunan = process_data_and_predict(uploaded_file)
+        
+        # Hitung Rata-rata 5 Tahunan
+        # Resampling 5 tahun dari indeks tahun bulat
+        data_5_tahun = data_ml_tahunan.groupby(data_ml_tahunan.index // 5 * 5).mean()
 
-        rng = np.random.default_rng(seed=42)
-        range_bulan = pd.date_range(start="2025-01-01", end=f"{tahun_evaluasi}-12-31", freq="MS")
-        data_ml_bulan = pd.DataFrame(index=range_bulan)
+        tab1, tab2, tab3 = st.tabs(["📈 Prediksi ML (Scikit-Learn)", "⚖️ Keputusan MCDM", "🏔️ Terrain Spasial 3D"])
 
-        for col in data_input.columns:
-            base_val = data_input[col].mean()
-            tren = np.linspace(base_val, base_val * 1.6, len(range_bulan))
-            seasonality = 0.2 * base_val * np.sin(2 * np.pi * range_bulan.month / 12)
-            noise = rng.normal(0, base_val * 0.05, len(range_bulan))
-            data_ml_bulan[col] = tren + seasonality + noise
-
-        data_5_tahun = data_ml_bulan.resample('5YS').mean()
-        data_5_tahun.index = data_5_tahun.index.year
-
-        # TABS
-        tab1, tab2, tab3 = st.tabs(["📈 Analisis Prediksi (ML)", "⚖️ MCDM & Kebijakan", "🗺️ Peta Potensi Spasial"])
-
-        # ====================================================
-        # TAB 1: PREDIKSI ML
-        # ====================================================
+        # ---------------- TAB 1: PREDIKSI ML ----------------
         with tab1:
-            st.header(f"Proyeksi Potensi Daya hingga {tahun_evaluasi}")
-            col_c1, col_c2 = st.columns(2)
+            st.header(f"Proyeksi Suplai Energi Berbasis Regresi Linear (hingga 2060)")
+            
+            # Cek jika data dari NASA, tampilkan notifikasi
+            if uploaded_file.name.endswith('.csv'):
+                st.success("🛰️ **NASA POWER Data Detected!** Sistem secara otomatis memotong metadata, mengatasi *missing values* (-999.0), dan menormalisasi *irradiance/wind speed* menjadi ekuivalen kapasitas daya.")
+            
+            st.write("**Historis vs Prediksi (MW):**")
+            # Menggabungkan historis dan prediksi untuk grafik
+            df_gabung = pd.concat([data_historis, data_ml_tahunan])
+            fig_gabung = px.line(
+                df_gabung.reset_index().melt(id_vars="index", var_name="Teknologi", value_name="MW"),
+                x="index", y="MW", color="Teknologi",
+                labels={"index": "Tahun"}, template="plotly_dark",
+                title="Histori Data (Kiri) & Tren Prediksi ML (Kanan)"
+            )
+            # Garis pembatas tahun sekarang
+            fig_gabung.add_vline(x=2024, line_dash="dash", line_color="red", annotation_text="Mulai Prediksi")
+            st.plotly_chart(fig_gabung, use_container_width=True)
 
-            with col_c1:
-                st.write("**Tren Potensi Per 5 Tahun (MW):**")
-                fig_bar = px.bar(
-                    data_5_tahun.reset_index().melt(id_vars="index", var_name="Teknologi", value_name="MW"),
-                    x="index", y="MW", color="Teknologi", barmode="group",
-                    labels={"index": "Tahun"}, template="plotly_dark"
-                )
-                st.plotly_chart(fig_bar, use_container_width=True)
-
-            with col_c2:
-                st.write(f"**Fluktuasi Bulanan Tahun {tahun_evaluasi}:**")
-                data_tahun_terakhir = data_ml_bulan[data_ml_bulan.index.year == tahun_evaluasi].copy()
-                if not data_tahun_terakhir.empty:
-                    data_tahun_terakhir.index = data_tahun_terakhir.index.month_name()
-                    fig_line = px.line(
-                        data_tahun_terakhir.reset_index().melt(id_vars="index", var_name="Teknologi", value_name="MW"),
-                        x="index", y="MW", color="Teknologi",
-                        labels={"index": "Bulan"}, template="plotly_dark"
-                    )
-                    st.plotly_chart(fig_line, use_container_width=True)
-                else:
-                    st.warning(f"Data untuk tahun {tahun_evaluasi} tidak tersedia.")
-
-        # ====================================================
-        # TAB 2: MCDM
-        # ====================================================
+        # ---------------- TAB 2: MCDM ----------------
         with tab2:
             st.header("MCDM dengan Parameter Dinamis")
-
-            n_alt = len(data_input.columns)
+            n_alt = len(data_historis.columns)
             capex_awal    = np.array([12.0, 18.0, 22.0, 25.0][:n_alt])
             emisi_aktual  = np.array([40.0, 11.0, 24.0, 230.0][:n_alt])
             sosial_aktual = np.array([90, 70, 85, 80][:n_alt])
@@ -163,353 +165,122 @@ if uploaded_file is not None:
 
             if kebijakan == "Pajak Karbon Tinggi (Pro-Lingkungan)":
                 pengali_emisi = 1.5
-                st.warning("🌿 Penalti emisi diaktifkan (+50% bobot emisi).")
             elif kebijakan == "Subsidi Masif EBT (Pro-Ekonomi)":
                 pengali_emisi = 1.0
                 capex_terinflasi *= 0.7
-                st.info("💰 Diskon investasi 30% diaktifkan.")
             else:
                 pengali_emisi = 1.0
 
             col_b1, col_b2 = st.columns([1, 2])
             with col_b1:
-                w_tech = st.slider("Potensi Daya (Benefit)",     0.0, 1.0, 0.4)
-                w_econ = st.slider("Biaya Investasi (Cost)",      0.0, 1.0, 0.3)
-                w_env  = st.slider("Emisi Karbon (Cost)",         0.0, 1.0, 0.2) * pengali_emisi
+                w_tech = st.slider("Potensi Daya (Benefit)", 0.0, 1.0, 0.4)
+                w_econ = st.slider("Biaya Investasi (Cost)", 0.0, 1.0, 0.3)
+                w_env  = st.slider("Emisi Karbon (Cost)", 0.0, 1.0, 0.2) * pengali_emisi
                 w_soc  = st.slider("Penerimaan Sosial (Benefit)", 0.0, 1.0, 0.1)
                 total  = w_tech + w_econ + w_env + w_soc
-                if total == 0:
-                    st.warning("Total bobot nol. Sesuaikan slider.")
-                    st.stop()
+                if total == 0: st.stop()
                 w_tech, w_econ, w_env, w_soc = w_tech/total, w_econ/total, w_env/total, w_soc/total
 
             with col_b2:
-                tahun_tersedia = data_5_tahun.index[data_5_tahun.index <= tahun_evaluasi]
-                tahun_lookup   = tahun_tersedia[-1] if len(tahun_tersedia) > 0 else data_5_tahun.index[0]
-                skor_daya      = data_5_tahun.loc[tahun_lookup]
-
+                # Ambil skor daya sesuai slider tahun_evaluasi
+                skor_daya = data_ml_tahunan.loc[tahun_evaluasi] if tahun_evaluasi in data_ml_tahunan.index else data_ml_tahunan.iloc[-1]
+                
                 data_aktual = pd.DataFrame({
-                    "Daya Prediksi (MW)":              skor_daya.values,
-                    "Investasi Terinflasi (M IDR/MW)": capex_terinflasi,
-                    "Emisi (Ton CO2e/GWh)":            emisi_aktual,
-                    "Sosial (1-100)":                  sosial_aktual,
-                }, index=data_input.columns)
+                    "Prediksi Daya (MW)": skor_daya.values,
+                    "Investasi (M IDR/MW)": capex_terinflasi,
+                    "Emisi (Ton/GWh)": emisi_aktual,
+                    "Sosial (1-100)": sosial_aktual,
+                }, index=data_historis.columns)
                 st.dataframe(data_aktual.style.format("{:.2f}"))
 
+            # Normalisasi & Kalkulasi MCDM
             norm_df = pd.DataFrame(index=data_aktual.index)
-            norm_df["Daya"]     = data_aktual["Daya Prediksi (MW)"] / data_aktual["Daya Prediksi (MW)"].max()
-            norm_df["Sosial"]   = data_aktual["Sosial (1-100)"] / data_aktual["Sosial (1-100)"].max()
-            norm_df["Investasi"] = data_aktual["Investasi Terinflasi (M IDR/MW)"].min() / data_aktual["Investasi Terinflasi (M IDR/MW)"]
-            norm_df["Emisi"]    = data_aktual["Emisi (Ton CO2e/GWh)"].min() / data_aktual["Emisi (Ton CO2e/GWh)"]
+            norm_df["Daya"] = data_aktual["Prediksi Daya (MW)"] / data_aktual["Prediksi Daya (MW)"].max()
+            norm_df["Sosial"] = data_aktual["Sosial (1-100)"] / data_aktual["Sosial (1-100)"].max()
+            norm_df["Investasi"] = data_aktual["Investasi (M IDR/MW)"].min() / data_aktual["Investasi (M IDR/MW)"]
+            norm_df["Emisi"] = data_aktual["Emisi (Ton/GWh)"].min() / data_aktual["Emisi (Ton/GWh)"]
 
-            skor_akhir = (
-                norm_df["Daya"] * w_tech + norm_df["Investasi"] * w_econ +
-                norm_df["Emisi"] * w_env + norm_df["Sosial"] * w_soc
-            )
-            hasil_df = pd.DataFrame(skor_akhir, columns=["Skor Preferensi"]).sort_values("Skor Preferensi", ascending=False)
+            skor_akhir = (norm_df["Daya"]*w_tech + norm_df["Investasi"]*w_econ + norm_df["Emisi"]*w_env + norm_df["Sosial"]*w_soc)
+            hasil_df = pd.DataFrame(skor_akhir, columns=["Skor"]).sort_values("Skor", ascending=False)
 
             st.divider()
-            st.subheader("🏆 Rekomendasi Prioritas")
-            col_r1, col_r2 = st.columns(2)
-            with col_r1:
-                fig_rank = px.bar(
-                    hasil_df.reset_index(), x="Skor Preferensi", y="index",
-                    orientation="h", color="Skor Preferensi",
-                    color_continuous_scale="Teal", template="plotly_dark",
-                    labels={"index": "Teknologi"}
-                )
-                fig_rank.update_layout(yaxis={"categoryorder": "total ascending"})
-                st.plotly_chart(fig_rank, use_container_width=True)
-            with col_r2:
-                st.success(f"**Pemenang:** {hasil_df.index[0]} | Skor: {hasil_df.iloc[0]['Skor Preferensi']:.3f}")
-
-                # ✅ FIX RADAR: Hitung kontribusi TERTIMBANG per dimensi per alternatif
-                # Sehingga radar berubah ketika slider bobot digeser
-                bobot_label = {
-                    "Daya":      w_tech,
-                    "Investasi": w_econ,
-                    "Emisi":     w_env,
-                    "Sosial":    w_soc,
-                }
-                categories = list(bobot_label.keys())
-
-                # Kontribusi = nilai_ternormalisasi * bobot — ini yang berubah saat slider digeser
-                weighted_df = pd.DataFrame({
-                    dim: norm_df[dim] * bobot_label[dim]
-                    for dim in categories
-                }, index=norm_df.index)
-
-                fig_radar = go.Figure()
-                for alt in weighted_df.index:
-                    vals = weighted_df.loc[alt, categories].tolist()
-                    fig_radar.add_trace(go.Scatterpolar(
-                        r=vals + [vals[0]],
-                        theta=[f"{d} ({bobot_label[d]*100:.0f}%)" for d in categories] +
-                              [f"{categories[0]} ({bobot_label[categories[0]]*100:.0f}%)"],
-                        fill='toself',
-                        name=alt
-                    ))
-                fig_radar.update_layout(
-                    polar=dict(radialaxis=dict(visible=True, range=[0, max(w_tech, w_econ, w_env, w_soc) * 1.1])),
-                    template="plotly_dark", height=320,
-                    margin=dict(l=20, r=20, t=40, b=20),
-                    title=dict(text="Kontribusi Bobot per Dimensi", font=dict(size=13))
-                )
-                st.plotly_chart(fig_radar, use_container_width=True)
-                st.caption("💡 Geser slider bobot di kiri — grafik kompas akan ikut berubah.")
+            st.subheader(f"🏆 Rekomendasi Prioritas Tahun {tahun_evaluasi}")
+            fig_rank = px.bar(hasil_df.reset_index(), x="Skor", y="index", orientation="h", color="Skor", template="plotly_dark")
+            fig_rank.update_layout(yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(fig_rank, use_container_width=True)
 
             # ==========================================
-            # FIX #2: AI INSIGHT — simpan ke session_state agar tidak hilang
+            # GENERATIVE AI INSIGHT
             # ==========================================
             st.divider()
             st.subheader("🤖 AI Executive Summary")
-
-            col_ai1, col_ai2 = st.columns([1, 3])
-            with col_ai1:
-                generate_btn = st.button("✨ Generate AI Insight")
-            with col_ai2:
-                if st.session_state.ai_result_model:
-                    st.caption(f"Terakhir dianalisis via: `{st.session_state.ai_result_model}`")
-
-            if generate_btn:
+            
+            if st.button("✨ Generate AI Insight"):
                 if not api_key:
-                    st.warning("⚠️ Masukkan API Key di sidebar.")
+                    st.warning("⚠️ Masukkan API Key.")
                 else:
                     try:
                         client = genai.Client(api_key=api_key)
-
-                        # Siapkan data untuk chart perubahan skor antar skenario
-                        skenario_list = [
-                            "Business as Usual (BAU)",
-                            "Pajak Karbon Tinggi (Pro-Lingkungan)",
-                            "Subsidi Masif EBT (Pro-Ekonomi)"
-                        ]
-                        chart_rows = []
-                        for sk in skenario_list:
-                            cap_tmp = capex_awal * ((1 + inflasi) ** selisih_tahun)
-                            em_mult = 1.5 if sk == "Pajak Karbon Tinggi (Pro-Lingkungan)" else 1.0
-                            if sk == "Subsidi Masif EBT (Pro-Ekonomi)":
-                                cap_tmp *= 0.7
-                            n_inv = cap_tmp.min() / cap_tmp
-                            n_em  = emisi_aktual.min() / (emisi_aktual * em_mult)
-                            n_d   = skor_daya.values / skor_daya.values.max()
-                            n_s   = sosial_aktual / sosial_aktual.max()
-                            sc    = n_d * w_tech + n_inv * w_econ + n_em * w_env + n_s * w_soc
-                            for alt, s in zip(data_input.columns, sc):
-                                chart_rows.append({"Skenario": sk, "Teknologi": alt, "Skor": round(float(s), 3)})
-                        st.session_state.ai_chart_data = pd.DataFrame(chart_rows)
-
                         prompt_ai = f"""
-Anda adalah pakar transisi energi Kabupaten Kulon Progo. Berikan ringkasan SINGKAT (maks 4 kalimat per poin) berformat JSON:
-{{
-  "mengapa_menang": "...",
-  "dampak_ekonomi": "...",
-  "rekomendasi": "..."
-}}
-
-Data:
-- Tahun: {tahun_evaluasi}, Skenario: {kebijakan}, Inflasi: {inflasi*100:.1f}%
-- Ranking: {hasil_df.to_string()}
-Jawab HANYA dengan JSON valid, tanpa markdown/backtick.
+Anda adalah pakar transisi energi. Berikan ringkasan berformat JSON (maks 4 kalimat per poin):
+{{ "mengapa_menang": "...", "dampak_ekonomi": "...", "rekomendasi": "..." }}
+Data: Tahun {tahun_evaluasi}, Kebijakan {kebijakan}, Inflasi {inflasi*100}%. 
+Ranking: {hasil_df.to_string()}
+Jawab murni JSON.
 """
-                        with st.spinner("AI sedang menganalisis..."):
-                            response = client.models.generate_content(
-                                model="gemini-2.5-flash", contents=prompt_ai
-                            )
+                        with st.spinner("AI menganalisis..."):
+                            response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt_ai)
                             raw = response.text.strip()
-                            # bersihkan jika ada markdown fence
                             if raw.startswith("```"):
                                 raw = raw.split("```")[1]
-                                if raw.startswith("json"):
-                                    raw = raw[4:]
-                            st.session_state.ai_result_text  = json.loads(raw)
-                            st.session_state.ai_result_model = "gemini-2.5-flash"
-
+                                if raw.startswith("json"): raw = raw[4:]
+                            st.session_state.ai_result_text = json.loads(raw)
                     except Exception as e:
-                        st.error(f"Kesalahan AI: {e}")
+                        st.error(f"Error AI: {e}")
 
-            # Tampilkan hasil dari session_state (tetap ada walau pindah tab)
             if st.session_state.ai_result_text:
                 res = st.session_state.ai_result_text
                 c1, c2, c3 = st.columns(3)
-                with c1:
-                    st.info(f"🏆 **Mengapa Menang?**\n\n{res.get('mengapa_menang','')}")
-                with c2:
-                    st.warning(f"💰 **Dampak Ekonomi**\n\n{res.get('dampak_ekonomi','')}")
-                with c3:
-                    st.success(f"📋 **Rekomendasi**\n\n{res.get('rekomendasi','')}")
+                c1.info(f"🏆 **Mengapa Menang?**\n\n{res.get('mengapa_menang','')}")
+                c2.warning(f"💰 **Dampak Ekonomi**\n\n{res.get('dampak_ekonomi','')}")
+                c3.success(f"📋 **Rekomendasi**\n\n{res.get('rekomendasi','')}")
 
-            # FIX #2b: Chart perubahan skor antar skenario
-            if st.session_state.ai_chart_data is not None:
-                st.divider()
-                st.subheader("📊 Perubahan Skor Antar Skenario Kebijakan")
-                fig_sc = px.bar(
-                    st.session_state.ai_chart_data,
-                    x="Teknologi", y="Skor", color="Skenario",
-                    barmode="group", template="plotly_dark",
-                    color_discrete_sequence=["#4fc3f7", "#ff8a65", "#81c784"],
-                    title="Sensitivitas Skor Preferensi terhadap Perubahan Kebijakan"
-                )
-                st.plotly_chart(fig_sc, use_container_width=True)
-
-        # ====================================================
-        # TAB 3: PETA SPASIAL — FIX #3: 3D + Detail Investasi & APBN
-        # ====================================================
+        # ---------------- TAB 3: TERRAIN 3D ----------------
         with tab3:
-            st.header("🗺️ Pemetaan Geospasial Potensi EBT Kulon Progo")
+            st.header("🏔️ Digital Twin: Terrain Mode Kulon Progo")
+            st.write("Visualisasi topografi nyata. Tinggi kolom = Potensi Daya. Semakin kasar teksturnya, semakin tinggi elevasinya (pegunungan).")
 
-            mode_peta = st.radio(
-                "Mode Tampilan Peta:",
-                ["🗺️ 2D Interaktif", "🏔️ 3D Globe (Elevasi)"],
-                horizontal=True
+            df_pdk = df_lokasi.copy()
+            color_pdk = {"blue": [41, 182, 246, 200], "orange": [255, 167, 38, 200], "green": [102, 187, 106, 200], "darkred": [239, 83, 80, 200]}
+            df_pdk["color_rgb"] = df_pdk["Color"].map(color_pdk)
+
+            view_state = pdk.ViewState(latitude=-7.8288, longitude=110.1587, zoom=10.5, pitch=50, bearing=-10)
+
+            column_layer = pdk.Layer(
+                "ColumnLayer",
+                data=df_pdk,
+                get_position=["Lon", "Lat"],
+                get_elevation="Potensi_MW * 200",
+                elevation_scale=1, radius=400,
+                get_fill_color="color_rgb",
+                pickable=True, auto_highlight=True,
             )
 
-            if mode_peta == "🗺️ 2D Interaktif":
-                m = folium.Map(location=[-7.8288, 110.1587], zoom_start=11, tiles="CartoDB dark_matter")
-                for _, row in df_lokasi.iterrows():
-                    popup_html = f"""
-                    <div style='font-family:sans-serif;min-width:220px'>
-                        <h4 style='color:#00bcd4;margin:0'>{row['Teknologi']}</h4>
-                        <p style='margin:4px 0'><b>📍</b> {row['Kecamatan']}</p>
-                        <hr style='margin:6px 0'>
-                        <p style='margin:2px 0'>⚡ Potensi: <b>{row['Potensi_MW']} MW</b></p>
-                        <p style='margin:2px 0'>💰 Investasi Awal: <b>Rp {row['Investasi_M_IDR']} M/MW</b></p>
-                        <p style='margin:2px 0'>📅 Waktu Optimal: <b>{row['Waktu_Optimal']}</b></p>
-                        <p style='margin:2px 0'>🏛️ APBN: <b>{row['APBN_Tahap']}</b></p>
-                        <p style='margin:4px 0;font-size:11px;color:#888'>{row['Alasan']}</p>
-                    </div>
-                    """
-                    folium.Marker(
-                        location=[row['Lat'], row['Lon']],
-                        popup=folium.Popup(popup_html, max_width=260),
-                        tooltip=f"{row['Teknologi']} — {row['Potensi_MW']} MW | Klik untuk detail",
-                        icon=folium.Icon(color=row['Color'], icon=row['Icon'], prefix='fa')
-                    ).add_to(m)
-                st_folium(m, width=None, height=480, use_container_width=True)
-
-            else:
-                # 3D Globe menggunakan Plotly scatter_3d dengan elevasi
-                fig_3d = go.Figure()
-
-                # Latar belakang kontur wilayah (scatter sederhana)
-                color_map = {
-                    "PLTMH (Air)": "#29b6f6",
-                    "PLTS (Surya)": "#ffa726",
-                    "PLTB (Angin)": "#66bb6a",
-                    "Biomassa": "#ef5350"
-                }
-                for _, row in df_lokasi.iterrows():
-                    color = color_map.get(row['Teknologi'], "#ffffff")
-                    fig_3d.add_trace(go.Scatter3d(
-                        x=[row['Lon']],
-                        y=[row['Lat']],
-                        z=[row['Elevasi']],
-                        mode='markers+text',
-                        marker=dict(
-                            size=row['Potensi_MW'] * 0.8,  # ukuran = fungsi potensi
-                            color=color,
-                            opacity=0.85,
-                            symbol='circle',
-                            line=dict(color='white', width=1)
-                        ),
-                        text=[f"{row['Teknologi']}<br>{row['Potensi_MW']} MW"],
-                        textposition='top center',
-                        hovertemplate=(
-                            f"<b>{row['Teknologi']}</b><br>"
-                            f"📍 {row['Kecamatan']}<br>"
-                            f"⚡ {row['Potensi_MW']} MW<br>"
-                            f"💰 Rp {row['Investasi_M_IDR']} M/MW<br>"
-                            f"📅 {row['Waktu_Optimal']}<br>"
-                            f"🏛️ {row['APBN_Tahap']}<extra></extra>"
-                        ),
-                        name=row['Teknologi']
-                    ))
-
-                fig_3d.update_layout(
-                    scene=dict(
-                        xaxis_title="Longitude",
-                        yaxis_title="Latitude",
-                        zaxis_title="Elevasi (m)",
-                        bgcolor="rgb(10,15,30)",
-                        xaxis=dict(gridcolor="#1e3a5f", backgroundcolor="rgb(10,15,30)"),
-                        yaxis=dict(gridcolor="#1e3a5f", backgroundcolor="rgb(10,15,30)"),
-                        zaxis=dict(gridcolor="#1e3a5f", backgroundcolor="rgb(10,15,30)"),
-                        camera=dict(eye=dict(x=1.5, y=-2.0, z=1.2))
-                    ),
-                    template="plotly_dark",
-                    height=520,
-                    title="Visualisasi 3D — Ukuran marker = Potensi MW, Tinggi = Elevasi",
-                    legend=dict(x=0, y=1)
-                )
-                st.plotly_chart(fig_3d, use_container_width=True)
-                st.caption("💡 Klik & drag untuk memutar. Scroll untuk zoom. Hover untuk detail.")
-
-            # ---- Tabel Detail Investasi & APBN ----
-            st.divider()
-            st.subheader("📋 Detail Potensi, Investasi & Jadwal APBN")
-
-            df_display = df_lokasi[[
-                "Teknologi", "Kecamatan", "Potensi_MW",
-                "Investasi_M_IDR", "Waktu_Optimal", "APBN_Tahap", "Alasan"
-            ]].copy()
-            df_display.columns = [
-                "Teknologi", "Lokasi", "Potensi (MW)",
-                "Investasi Awal (Rp M/MW)", "Waktu Terbaik", "Siklus APBN", "Pertimbangan"
-            ]
-
-            st.dataframe(
-                df_display.style
-                .background_gradient(subset=["Potensi (MW)"], cmap="Blues")
-                .background_gradient(subset=["Investasi Awal (Rp M/MW)"], cmap="Oranges"),
-                use_container_width=True, height=220
+            terrain_layer = pdk.Layer(
+                "TerrainLayer",
+                elevation_decoder={"rScaler": 1, "gScaler": 0, "bScaler": 0, "offset": 0},
+                elevation_data="https://assets.mapbox.com/raster-tiles/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw",
+                texture="https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
             )
 
-            # ---- Timeline APBN Visual ----
-            st.subheader("🗓️ Timeline Optimal Pembangunan vs Siklus APBN")
-            timeline_data = []
-            for _, r in df_lokasi.iterrows():
-                start_y = int(r["Waktu_Optimal"].split("-")[0])
-                end_y   = int(r["Waktu_Optimal"].split("-")[1])
-                timeline_data.append({
-                    "Teknologi": f"{r['Teknologi']} ({r['Kecamatan'].split(' ')[0]})",
-                    "Mulai": start_y, "Selesai": end_y,
-                    "APBN": r["APBN_Tahap"],
-                    "MW": r["Potensi_MW"]
-                })
-            df_tl = pd.DataFrame(timeline_data)
-
-            fig_tl = px.timeline(
-                df_tl.assign(
-                    Mulai=pd.to_datetime(df_tl["Mulai"].astype(str) + "-01-01"),
-                    Selesai=pd.to_datetime(df_tl["Selesai"].astype(str) + "-12-31")
-                ),
-                x_start="Mulai", x_end="Selesai",
-                y="Teknologi", color="APBN",
-                hover_data=["MW"],
-                template="plotly_dark",
-                title="Jendela Pembangunan Optimal (sesuai Siklus RPJMN/APBN)",
-                color_discrete_sequence=["#4fc3f7", "#ff8a65"]
+            r = pdk.Deck(
+                layers=[terrain_layer, column_layer],
+                initial_view_state=view_state,
+                tooltip={"html": "<b>{Teknologi}</b><br/>📍 {Kecamatan}<br/>⚡ {Potensi_MW} MW", "style": {"backgroundColor": "steelblue", "color": "white"}}
             )
-            fig_tl.update_yaxes(autorange="reversed")
-            st.plotly_chart(fig_tl, use_container_width=True)
-
-            st.info(
-                "📍 **Catatan:** RPJMN 2025-2029 memprioritaskan proyek EBT skala kecil-menengah "
-                "yang shovel-ready. PLTB dan proyek pesisir masuk RPJMN 2030-2034 karena butuh "
-                "kajian lingkungan & sosial lebih panjang."
-            )
+            st.pydeck_chart(r)
 
     except Exception as e:
-        st.error(f"Terjadi kesalahan: {e}")
-        st.exception(e)
-
+        st.error(f"Terjadi kesalahan pemrosesan: {e}")
 else:
-    st.info("👈 Upload file Excel di sidebar untuk memulai.")
-    st.write("**Contoh Format Excel:**")
-    st.dataframe(pd.DataFrame({
-        "Tahun": [2020, 2021, 2022],
-        "PLTS (Surya)": [12.5, 13.0, 14.1],
-        "PLTB (Angin)": [8.2, 8.5, 8.1],
-        "PLTMH (Air)":  [18.0, 17.5, 18.2],
-        "Biomassa":     [10.0, 10.5, 11.0],
-    }))
+    st.info("👈 Upload file Excel atau CSV NASA POWER untuk memulai.")
