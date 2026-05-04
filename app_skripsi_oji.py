@@ -142,11 +142,12 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
 
         # Normalise kedua varian ke DataFrame
         if isinstance(raw_json, list):
-            # Varian 1: list of dicts
-            df_json = pd.DataFrame(raw_json)
+            # Varian 1: list of dicts  → [{Tahun:2020, PLTS:12.5}, ...]
+            df_json = pd.DataFrame.from_records(raw_json)
         elif isinstance(raw_json, dict):
-            # Varian 2: dict of lists
-            df_json = pd.DataFrame(raw_json)
+            # Varian 2: dict of lists  → {Tahun:[2020,...], PLTS:[12.5,...]}
+            # Konversi setiap value ke pd.Series agar pandas tidak ambiguous
+            df_json = pd.DataFrame({k: pd.Series(v) for k, v in raw_json.items()})
         else:
             raise ValueError(
                 "Format JSON tidak dikenali. Gunakan array of objects "
