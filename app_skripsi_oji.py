@@ -33,8 +33,8 @@ if "ai_chart_data"   not in st.session_state: st.session_state.ai_chart_data   =
 # SIDEBAR
 # ==========================================
 st.sidebar.header("📂 1. Input Data Sistem")
-st.sidebar.caption("Support: Excel manual (.xlsx) atau Raw NASA POWER (.csv)")
-uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv"])
+st.sidebar.caption("Support: Excel (.xlsx), NASA POWER (.csv), atau JSON (.json)")
+uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv", "json"])
 st.sidebar.divider()
 
 st.sidebar.header("🌍 2. Asumsi Makro & Kebijakan")
@@ -121,7 +121,64 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
     np.random.seed(random_seed)
 
     # ── SMART PARSER ──────────────────────────────────────────────────────────
-    if file_name.endswith('.csv'):
+    if file_name.endswith('.json'):
+        """
+        Format JSON yang didukung (dua varian):
+
+        Varian 1 — Array of objects (satu baris = satu tahun):
+        [
+          {"Tahun": 2020, "PLTS (Surya)": 12.5, "PLTB (Angin)": 8.2},
+          {"Tahun": 2021, "PLTS (Surya)": 13.0, "PLTB (Angin)": 8.5}
+        ]
+
+        Varian 2 — Object of arrays (kolom-kolom sebagai key):
+        {
+          "Tahun":        [2020, 2021, 2022],
+          "PLTS (Surya)": [12.5, 13.0, 14.1],
+          "PLTB (Angin)": [8.2,  8.5,  8.1]
+        }
+        """
+        raw_json = json.loads(file_bytes.decode("utf-8"))
+
+        # Normalise kedua varian ke DataFrame
+        if isinstance(raw_json, list):
+            # Varian 1: list of dicts
+            df_json = pd.DataFrame(raw_json)
+        elif isinstance(raw_json, dict):
+            # Varian 2: dict of lists
+            df_json = pd.DataFrame(raw_json)
+        else:
+            raise ValueError(
+                "Format JSON tidak dikenali. Gunakan array of objects "
+                "[{\"Tahun\":2020, ...}] atau object of arrays "
+                "{\"Tahun\":[2020,...], ...}."
+            )
+
+        # Cari kolom tahun (case-insensitive)
+        tahun_col = next(
+            (c for c in df_json.columns if c.strip().lower() == "tahun"), None
+        )
+        if tahun_col is None:
+            raise ValueError(
+                "File JSON harus memiliki kolom 'Tahun' "
+                "(sebagai kunci tahun data historis)."
+            )
+
+        df_json = df_json.rename(columns={tahun_col: "Tahun"})
+        df_json["Tahun"] = df_json["Tahun"].astype(int)
+
+        # Kolom numerik selain Tahun = kolom teknologi EBT
+        kolom_ebt = [c for c in df_json.columns if c != "Tahun"]
+        if not kolom_ebt:
+            raise ValueError("File JSON tidak memiliki kolom data EBT selain 'Tahun'.")
+
+        # Pastikan semua kolom EBT numerik
+        for c in kolom_ebt:
+            df_json[c] = pd.to_numeric(df_json[c], errors='coerce')
+
+        data_input = df_json.set_index("Tahun")[kolom_ebt].dropna(how="all")
+
+    elif file_name.endswith('.csv'):
         raw_text = file_bytes.decode("utf-8")
         lines    = raw_text.split('\n')
         skip_rows = 0
@@ -281,6 +338,12 @@ if uploaded_file is not None:
                     "🛰️ **NASA POWER Data Detected!** Metadata otomatis dipotong, "
                     "*missing values* (-999.0) diatasi, dan parameter iklim dinormalisasi "
                     "menjadi ekuivalen kapasitas daya."
+                )
+            elif file_name.endswith('.json'):
+                st.success(
+                    "📋 **JSON Data Detected!** Mendukung dua varian: "
+                    "*array of objects* `[{\"Tahun\":2020, ...}]` maupun "
+                    "*object of arrays* `{\"Tahun\":[2020,...], ...}`."
                 )
 
             # ── Metrik Evaluasi Model ──────────────────────────────────────────
@@ -698,12 +761,38 @@ Jawab HANYA dengan JSON valid, tanpa markdown/backtick.
         st.exception(e)
 
 else:
-    st.info("👈 Upload file Excel atau CSV NASA POWER di sidebar untuk memulai.")
-    st.write("**Contoh Format Excel yang Didukung:**")
-    st.dataframe(pd.DataFrame({
-        "Tahun":         [2020, 2021, 2022, 2023, 2024],
-        "PLTS (Surya)":  [12.5, 13.0, 14.1, 14.8, 15.3],
-        "PLTB (Angin)":  [8.2,  8.5,  8.1,  8.7,  9.0],
-        "PLTMH (Air)":   [18.0, 17.5, 18.2, 17.9, 18.5],
-        "Biomassa":      [10.0, 10.5, 11.0, 11.2, 11.8],
-    }))
+    st.info("👈 Upload file Excel, CSV NASA POWER, atau JSON di sidebar untuk memulai.")
+
+    col_ex1, col_ex2 = st.columns(2)
+
+    with col_ex1:
+        st.write("**📊 Contoh Format Excel / CSV:**")
+        st.dataframe(pd.DataFrame({
+            "Tahun":         [2020, 2021, 2022, 2023, 2024],
+            "PLTS (Surya)":  [12.5, 13.0, 14.1, 14.8, 15.3],
+            "PLTB (Angin)":  [8.2,  8.5,  8.1,  8.7,  9.0],
+            "PLTMH (Air)":   [18.0, 17.5, 18.2, 17.9, 18.5],
+            "Biomassa":      [10.0, 10.5, 11.0, 11.2, 11.8],
+        }))
+
+    with col_ex2:
+        st.write("**📋 Contoh Format JSON (dua varian yang didukung):**")
+        st.code(
+            """// Varian 1 — Array of objects
+[
+  {"Tahun": 2020, "PLTS (Surya)": 12.5, "PLTB (Angin)": 8.2},
+  {"Tahun": 2021, "PLTS (Surya)": 13.0, "PLTB (Angin)": 8.5},
+  {"Tahun": 2022, "PLTS (Surya)": 14.1, "PLTB (Angin)": 8.1}
+]
+
+// Varian 2 — Object of arrays
+{
+  "Tahun":        [2020, 2021, 2022],
+  "PLTS (Surya)": [12.5, 13.0, 14.1],
+  "PLTB (Angin)": [8.2,  8.5,  8.1],
+  "PLTMH (Air)":  [18.0, 17.5, 18.2],
+  "Biomassa":     [10.0, 10.5, 11.0]
+}""",
+            language="json"
+        )
+        st.caption("Kolom **'Tahun'** wajib ada. Kolom lainnya = teknologi EBT (bebas nama).")
