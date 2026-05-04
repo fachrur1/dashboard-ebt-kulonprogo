@@ -446,8 +446,9 @@ Data: Tahun {tahun_evaluasi}, Skenario {kebijakan}, Inflasi {inflasi*100:.1f}%. 
                         with st.spinner("AI sedang menganalisis..."):
                             response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt_ai)
                             raw = response.text.strip()
-                            if raw.startswith("```"): raw = raw.split("
-```")[1].replace("json\n", "").replace("json", "")
+                            if raw.startswith("```"): 
+                                raw = raw.split("```")[1]
+                                raw = raw.replace("json\n", "").replace("json", "")
                             st.session_state.ai_result_text = json.loads(raw)
                             st.session_state.ai_result_model = "gemini-2.0-flash"
                     except Exception as e: 
