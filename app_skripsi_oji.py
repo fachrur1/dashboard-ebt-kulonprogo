@@ -390,20 +390,32 @@ if uploaded_file is not None:
             df_pred = data_ml_tahunan.copy().reset_index()
             df_pred['Tipe'] = 'Prediksi'
 
-            # Gabungkan data dengan cara yang lebih baik
-            cols_bersama = [c for c in df_hist.columns if c in df_pred.columns and c != 'Tipe']
-            df_gabung = pd.concat([
-                df_hist[['Tahun', 'Tipe'] + cols_bersama],
-                df_pred[['Tahun', 'Tipe'] + cols_bersama]
-            ], ignore_index=True)
+            # Ambil hanya kolom teknologi (numeric) dari data historis
+            cols_teknologi = list(data_historis.columns)
             
+            # Pastikan urutan kolom sama dan tidak ada duplikat di kedua dataframe
+            df_hist_plot = df_hist[['Tahun'] + cols_teknologi + ['Tipe']].copy()
+            df_pred_plot = df_pred[['Tahun'] + cols_teknologi + ['Tipe']].copy()
+            
+            # Gabungkan
+            df_gabung = pd.concat([df_hist_plot, df_pred_plot], ignore_index=True)
+
+            # Melt untuk plotly - tentukan value_vars secara eksplisit untuk menghindari duplikat
+            df_melted = df_gabung.melt(
+                id_vars=['Tahun', 'Tipe'], 
+                value_vars=cols_teknologi,
+                var_name='Teknologi', 
+                value_name='MW'
+            )
+
             fig_tren = px.line(
-                df_gabung.melt(id_vars=['Tahun', 'Tipe'], var_name='Teknologi', value_name='MW'),
+                df_melted,
                 x='Tahun', y='MW', color='Teknologi', line_dash='Tipe',
                 template='plotly_white',
+                markers=True,
                 title=f"Prediksi Potensi EBT per Teknologi (2015-{tahun_akhir})"
             )
-            fig_tren.add_vline(x=2025, line_dash='dash', line_color='red', annotation_text="Mulai Prediksi")
+            fig_tren.add_vline(x=2025, line_dash='dot', line_color='red', annotation_text="Mulai Prediksi")
             fig_tren.update_layout(hovermode='x unified', yaxis_title="Potensi (MW)", xaxis_title="Tahun")
             st.plotly_chart(fig_tren, use_container_width=True)
 
