@@ -123,64 +123,110 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
     # ── SMART PARSER ──────────────────────────────────────────────────────────
     if file_name.endswith('.json'):
         """
-        Format JSON yang didukung (dua varian):
+        Mendukung tiga varian JSON:
 
-        Varian 1 — Array of objects (satu baris = satu tahun):
-        [
-          {"Tahun": 2020, "PLTS (Surya)": 12.5, "PLTB (Angin)": 8.2},
-          {"Tahun": 2021, "PLTS (Surya)": 13.0, "PLTB (Angin)": 8.5}
-        ]
+        Varian A — NASA POWER GeoJSON (format resmi dari power.larc.nasa.gov):
+          {"type":"Feature","properties":{"parameter":{"ALLSKY_SFC_SW_DWN":{"202001":5.08,...}}},...}
+          Key bulan format YYYYMM; bulan ke-13 = rata-rata tahunan (dilewati).
 
-        Varian 2 — Object of arrays (kolom-kolom sebagai key):
-        {
-          "Tahun":        [2020, 2021, 2022],
-          "PLTS (Surya)": [12.5, 13.0, 14.1],
-          "PLTB (Angin)": [8.2,  8.5,  8.1]
-        }
+        Varian B — Array of objects (satu baris = satu tahun):
+          [{"Tahun": 2020, "PLTS (Surya)": 12.5, ...}, ...]
+
+        Varian C — Object of arrays (kolom sebagai key):
+          {"Tahun": [2020, 2021], "PLTS (Surya)": [12.5, 13.0], ...}
         """
         raw_json = json.loads(file_bytes.decode("utf-8"))
 
-        # Normalise kedua varian ke DataFrame
-        if isinstance(raw_json, list):
-            # Varian 1: list of dicts  → [{Tahun:2020, PLTS:12.5}, ...]
+        # --- Deteksi Varian A: NASA POWER GeoJSON ---
+        is_nasa_geojson = (
+            isinstance(raw_json, dict)
+            and raw_json.get("type") == "Feature"
+            and "properties" in raw_json
+            and "parameter" in raw_json.get("properties", {})
+        )
+
+        if is_nasa_geojson:
+            # Mapping parameter NASA → nama kolom EBT + faktor konversi
+            NASA_MAP = {
+                "ALLSKY_SFC_SW_DWN": ("PLTS (Surya)", 3.5),
+                "WS10M":             ("PLTB (Angin)", 2.8),
+                "PRECTOTCORR":       ("PLTMH (Air)",  1.5),
+            }
+            fill_val = raw_json.get("header", {}).get("fill_value", -999)
+            params   = raw_json["properties"]["parameter"]
+
+            # Agregasi bulanan → rata-rata per tahun (bulan ke-13 = annual, dilewati)
+            year_data = {}
+            for param_key, monthly in params.items():
+                if param_key not in NASA_MAP:
+                    continue
+                col_name, factor = NASA_MAP[param_key]
+                for k, v in monthly.items():
+                    month = int(k[4:])
+                    if month == 13:
+                        continue          # lewati nilai rata-rata tahunan bawaan NASA
+                    if v == fill_val or v is None:
+                        continue          # lewati missing value
+                    year = int(k[:4])
+                    year_data.setdefault(year, {}).setdefault(col_name, []).append(v * factor)
+
+            if not year_data:
+                raise ValueError(
+                    "File NASA POWER GeoJSON tidak mengandung parameter EBT yang dikenali "
+                    "(ALLSKY_SFC_SW_DWN, WS10M, PRECTOTCORR)."
+                )
+
+            records = [
+                {"Tahun": yr, **{col: float(np.mean(vals)) for col, vals in cols.items()}}
+                for yr, cols in sorted(year_data.items())
+            ]
+            data_input = pd.DataFrame.from_records(records).set_index("Tahun")
+
+        # --- Varian B: list of dicts [{Tahun:2020,...}, ...] ---
+        elif isinstance(raw_json, list):
             df_json = pd.DataFrame.from_records(raw_json)
+
+            ALIAS_TAHUN = {"tahun", "year"}
+            tahun_col   = next(
+                (c for c in df_json.columns if c.strip().lower() in ALIAS_TAHUN), None
+            )
+            if tahun_col is None:
+                raise ValueError(
+                    f"Varian B (array of objects): kolom 'Tahun' tidak ditemukan. "
+                    f"Kolom yang ada: {list(df_json.columns)}"
+                )
+            df_json = df_json.rename(columns={tahun_col: "Tahun"})
+            df_json["Tahun"] = df_json["Tahun"].astype(int)
+            kolom_ebt = [c for c in df_json.columns if c != "Tahun"]
+            for c in kolom_ebt:
+                df_json[c] = pd.to_numeric(df_json[c], errors='coerce')
+            data_input = df_json.set_index("Tahun")[kolom_ebt].dropna(how="all")
+
+        # --- Varian C: dict of arrays {"Tahun":[...],"PLTS":[...]} ---
         elif isinstance(raw_json, dict):
-            # Varian 2: dict of lists  → {Tahun:[2020,...], PLTS:[12.5,...]}
-            # Konversi setiap value ke pd.Series agar pandas tidak ambiguous
-            df_json = pd.DataFrame({k: pd.Series(v) for k, v in raw_json.items()})
+            df_json     = pd.DataFrame({k: pd.Series(v) for k, v in raw_json.items()})
+            ALIAS_TAHUN = {"tahun", "year"}
+            tahun_col   = next(
+                (c for c in df_json.columns if c.strip().lower() in ALIAS_TAHUN), None
+            )
+            if tahun_col is None:
+                raise ValueError(
+                    f"Varian C (object of arrays): kolom 'Tahun' tidak ditemukan. "
+                    f"Kolom yang ada: {list(df_json.columns)}"
+                )
+            df_json = df_json.rename(columns={tahun_col: "Tahun"})
+            df_json["Tahun"] = df_json["Tahun"].astype(int)
+            kolom_ebt = [c for c in df_json.columns if c != "Tahun"]
+            for c in kolom_ebt:
+                df_json[c] = pd.to_numeric(df_json[c], errors='coerce')
+            data_input = df_json.set_index("Tahun")[kolom_ebt].dropna(how="all")
+
         else:
             raise ValueError(
-                "Format JSON tidak dikenali. Gunakan array of objects "
-                "[{\"Tahun\":2020, ...}] atau object of arrays "
-                "{\"Tahun\":[2020,...], ...}."
+                "Format JSON tidak dikenali. Gunakan NASA POWER GeoJSON, "
+                "array of objects [{\"Tahun\":2020,...}], "
+                "atau object of arrays {\"Tahun\":[2020,...],...}."
             )
-
-        # Cari kolom tahun — cocokkan "tahun" ATAU "year" (case-insensitive, strip spasi)
-        ALIAS_TAHUN = {"tahun", "year"}
-        tahun_col = next(
-            (c for c in df_json.columns if c.strip().lower() in ALIAS_TAHUN), None
-        )
-        if tahun_col is None:
-            kolom_terdeteksi = ", ".join(f'"{c}"' for c in df_json.columns)
-            raise ValueError(
-                f"File JSON tidak memiliki kolom tahun. "
-                f"Kolom yang terdeteksi: [{kolom_terdeteksi}]. "
-                f"Tambahkan kolom bernama 'Tahun' atau 'Year' (tidak case-sensitive)."
-            )
-
-        df_json = df_json.rename(columns={tahun_col: "Tahun"})
-        df_json["Tahun"] = df_json["Tahun"].astype(int)
-
-        # Kolom numerik selain Tahun = kolom teknologi EBT
-        kolom_ebt = [c for c in df_json.columns if c != "Tahun"]
-        if not kolom_ebt:
-            raise ValueError("File JSON tidak memiliki kolom data EBT selain 'Tahun'.")
-
-        # Pastikan semua kolom EBT numerik
-        for c in kolom_ebt:
-            df_json[c] = pd.to_numeric(df_json[c], errors='coerce')
-
-        data_input = df_json.set_index("Tahun")[kolom_ebt].dropna(how="all")
 
     elif file_name.endswith('.csv'):
         raw_text = file_bytes.decode("utf-8")
@@ -364,9 +410,10 @@ if uploaded_file is not None:
                 )
             elif file_name.endswith('.json'):
                 st.success(
-                    "📋 **JSON Data Detected!** Mendukung dua varian: "
-                    "*array of objects* `[{\"Tahun\":2020, ...}]` maupun "
-                    "*object of arrays* `{\"Tahun\":[2020,...], ...}`."
+                    "📋 **JSON Data Detected!** Mendukung tiga varian: "
+                    "**NASA POWER GeoJSON** (format resmi dari power.larc.nasa.gov), "
+                    "*array of objects* `[{\"Tahun\":2020, ...}]`, "
+                    "maupun *object of arrays* `{\"Tahun\":[2020,...], ...}`."
                 )
 
             # ── Metrik Evaluasi Model ──────────────────────────────────────────
