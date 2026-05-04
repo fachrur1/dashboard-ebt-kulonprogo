@@ -9,3 +9,4 @@ openpyxl
 jinja2
 matplotlib
 pydeck
+scikit-learn
