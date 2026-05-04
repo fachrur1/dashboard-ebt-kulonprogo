@@ -130,6 +130,9 @@ def process_data_and_predict(file):
     # ==========================================
     # MACHINE LEARNING PIPELINE (Polynomial Regression)
     # ==========================================
+    # ==========================================
+    # MACHINE LEARNING PIPELINE (Linear Regression)
+    # ==========================================
     X_train = np.array(data_input.index).reshape(-1, 1)
     tahun_prediksi = np.arange(2025, 2061)
     X_pred = tahun_prediksi.reshape(-1, 1)
@@ -137,17 +140,23 @@ def process_data_and_predict(file):
     
     for col in data_input.columns:
         y_train = data_input[col].values
-        # Menggunakan derajat 2 agar grafik terlihat lengkung eksponensial (lebih realistis untuk inovasi teknologi)
-        model = Pipeline([('poly', PolynomialFeatures(degree=2)), ('linear', LinearRegression())])
+        
+        # KOREKSI: Kita kembali menggunakan Linear Regression.
+        # Regresi linier jauh lebih tangguh (robust) untuk proyeksi jangka panjang hingga 2060.
+        model = LinearRegression()
         model.fit(X_train, y_train)
         
         tren_prediksi = model.predict(X_pred)
-        noise = np.random.normal(0, np.std(y_train) * 0.2, len(tahun_prediksi))
-        # Pastikan tidak ada daya negatif
-        data_ml_tahunan[col] = np.maximum(0, tren_prediksi + noise)
+        
+        # Sedikit noise untuk mensimulasikan fluktuasi cuaca nyata
+        noise = np.random.normal(0, np.std(y_train) * 0.15, len(tahun_prediksi))
+        
+        # KOREKSI BATAS BAWAH: Mencegah regresi menyentuh angka nol mutlak
+        # Kita set batas bawah minimal adalah 20% dari rata-rata historis (angin tidak mungkin berhenti bertiup)
+        batas_bawah_logis = np.mean(y_train) * 0.2
+        data_ml_tahunan[col] = np.maximum(batas_bawah_logis, tren_prediksi + noise)
 
     return data_input, data_ml_tahunan
-
 
 # ==========================================
 # MAIN ROUTING
