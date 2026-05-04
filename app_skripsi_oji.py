@@ -71,7 +71,9 @@ kebijakan = st.sidebar.selectbox(
     "Skenario Kebijakan Transisi",
     ["Business as Usual (BAU)", "Pajak Karbon Tinggi (Pro-Lingkungan)", "Subsidi Masif EBT (Pro-Ekonomi)"]
 )
-tahun_evaluasi = st.sidebar.slider("Tahun Target Evaluasi MCDM", 2025, 2060, 2060)
+
+# SLIDER INI SEKARANG MENJADI KUNCI SINKRONISASI SEMUA TAB
+tahun_evaluasi = st.sidebar.slider("Tahun Target Evaluasi (Time Machine)", 2025, 2060, 2060)
 selisih_tahun = tahun_evaluasi - 2025
 st.sidebar.divider()
 
@@ -86,11 +88,11 @@ except Exception:
 # DATA LOKASI EBT
 # ==========================================
 LOKASI_EBT = [
-    {"Teknologi": "PLTMH (Air)", "Kecamatan": "Girimulyo - Perbukitan Menoreh", "Lat": -7.7470, "Lon": 110.1260, "Elevasi": 350, "Potensi_MW": 8.5, "Investasi_M_IDR": 18.5, "Color": "blue", "Icon": "tint", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2026-2027", "Alasan": "Debit sungai tinggi, infrastruktur jalan sudah ada."},
+    {"Teknologi": "PLTMH (Air)", "Kecamatan": "Girimulyo", "Lat": -7.7470, "Lon": 110.1260, "Elevasi": 350, "Potensi_MW": 8.5, "Investasi_M_IDR": 18.5, "Color": "blue", "Icon": "tint", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2026-2027", "Alasan": "Debit sungai tinggi, infrastruktur jalan sudah ada."},
     {"Teknologi": "PLTMH (Air)", "Kecamatan": "Samigaluh", "Lat": -7.6710, "Lon": 110.1700, "Elevasi": 420, "Potensi_MW": 6.2, "Investasi_M_IDR": 14.0, "Color": "blue", "Icon": "tint", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2027-2028", "Alasan": "Perlu studi hidrologi lanjutan, akses jalan terbatas."},
-    {"Teknologi": "PLTS (Surya)", "Kecamatan": "Wates - Dataran Rendah", "Lat": -7.8600, "Lon": 110.1400, "Elevasi": 15, "Potensi_MW": 22.0, "Investasi_M_IDR": 28.0, "Color": "orange", "Icon": "sun", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2025-2026", "Alasan": "Irradiasi matahari tinggi, lahan tersedia, dekat jaringan PLN."},
-    {"Teknologi": "PLTB (Angin)", "Kecamatan": "Temon / Pantai Glagah", "Lat": -7.9150, "Lon": 110.0760, "Elevasi": 5, "Potensi_MW": 15.0, "Investasi_M_IDR": 35.0, "Color": "green", "Icon": "cloud", "APBN_Tahap": "RPJMN 2030-2034", "Waktu_Optimal": "2030-2032", "Alasan": "Kecepatan angin laut stabil >5 m/s. Butuh kajian lingkungan pesisir."},
-    {"Teknologi": "Biomassa", "Kecamatan": "Sentolo / Nanggulan", "Lat": -7.7840, "Lon": 110.2220, "Elevasi": 80, "Potensi_MW": 4.5, "Investasi_M_IDR": 12.0, "Color": "darkred", "Icon": "leaf", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2028-2029", "Alasan": "Limbah pertanian melimpah, perlu kemitraan petani lokal."},
+    {"Teknologi": "PLTS (Surya)", "Kecamatan": "Wates", "Lat": -7.8600, "Lon": 110.1400, "Elevasi": 15, "Potensi_MW": 22.0, "Investasi_M_IDR": 28.0, "Color": "orange", "Icon": "sun", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2025-2026", "Alasan": "Irradiasi matahari tinggi, lahan tersedia, dekat jaringan PLN."},
+    {"Teknologi": "PLTB (Angin)", "Kecamatan": "Pantai Glagah", "Lat": -7.9150, "Lon": 110.0760, "Elevasi": 5, "Potensi_MW": 15.0, "Investasi_M_IDR": 35.0, "Color": "green", "Icon": "cloud", "APBN_Tahap": "RPJMN 2030-2034", "Waktu_Optimal": "2030-2032", "Alasan": "Kecepatan angin laut stabil >5 m/s. Butuh kajian lingkungan pesisir."},
+    {"Teknologi": "Biomassa", "Kecamatan": "Sentolo", "Lat": -7.7840, "Lon": 110.2220, "Elevasi": 80, "Potensi_MW": 4.5, "Investasi_M_IDR": 12.0, "Color": "darkred", "Icon": "leaf", "APBN_Tahap": "RPJMN 2025-2029", "Waktu_Optimal": "2028-2029", "Alasan": "Limbah pertanian melimpah, perlu kemitraan petani lokal."},
 ]
 df_lokasi = pd.DataFrame(LOKASI_EBT)
 
@@ -102,19 +104,11 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
     np.random.seed(random_seed)
 
     if file_name.endswith('.json'):
-        try:
-            raw_json = json.loads(file_bytes.decode("utf-8"))
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Format JSON tidak valid: {e}")
-
+        raw_json = json.loads(file_bytes.decode("utf-8"))
         is_nasa_geojson = isinstance(raw_json, dict) and raw_json.get("type") == "Feature" and "properties" in raw_json and "parameter" in raw_json.get("properties", {})
 
         if is_nasa_geojson:
-            NASA_MAP = {
-                "ALLSKY_SFC_SW_DWN": ("PLTS (Surya)", 3.5),  
-                "WS10M": ("PLTB (Angin)", 2.8),               
-                "PRECTOTCORR": ("PLTMH (Air)", 1.5),         
-            }
+            NASA_MAP = {"ALLSKY_SFC_SW_DWN": ("PLTS (Surya)", 3.5), "WS10M": ("PLTB (Angin)", 2.8), "PRECTOTCORR": ("PLTMH (Air)", 1.5)}
             fill_val = raw_json.get("header", {}).get("fill_value", -999)
             params = raw_json["properties"]["parameter"]
             sample_param = list(params.values())[0]
@@ -125,8 +119,7 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
                 for param_key, monthly in params.items():
                     if param_key not in NASA_MAP: continue
                     col_name, factor = NASA_MAP[param_key]
-                    if "ANN" in monthly and monthly["ANN"] != fill_val:
-                        ann_val = monthly["ANN"] * factor
+                    if "ANN" in monthly and monthly["ANN"] != fill_val: ann_val = monthly["ANN"] * factor
                     else:
                         valid_vals = [v for k, v in monthly.items() if k not in ["ANN", "DJF", "MAM", "JJA", "SON"] and v != fill_val]
                         ann_val = np.mean(valid_vals) * factor if valid_vals else 0
@@ -138,35 +131,27 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
                     if param_key not in NASA_MAP: continue
                     col_name, factor = NASA_MAP[param_key]
                     for k, v in monthly.items():
-                        try:
-                            year, month = int(k[:4]), int(k[4:])
+                        try: year, month = int(k[:4]), int(k[4:])
                         except (ValueError, IndexError): continue
                         if month == 13 or v == fill_val or v is None: continue
                         year_data.setdefault(year, {}).setdefault(col_name, []).append(v * factor)
                 for yr in year_data:
                     for col in year_data[yr]:
-                        if isinstance(year_data[yr][col], list):
-                            year_data[yr][col] = float(np.mean(year_data[yr][col]))
+                        if isinstance(year_data[yr][col], list): year_data[yr][col] = float(np.mean(year_data[yr][col]))
 
-            if not year_data: raise ValueError("Data JSON NASA tidak mengandung parameter EBT yang dibutuhkan.")
+            if not year_data: raise ValueError("Data JSON NASA tidak mengandung parameter EBT.")
             records = [{"Tahun": yr, **cols} for yr, cols in sorted(year_data.items())]
             data_input = pd.DataFrame.from_records(records).set_index("Tahun")
 
         elif isinstance(raw_json, list):
-            df_json = pd.DataFrame.from_records(raw_json)
-            df_json = df_json.rename(columns={c: "Tahun" for c in df_json.columns if c.strip().lower() in {"tahun", "year"}})
-            if "Tahun" not in df_json.columns: raise ValueError("Kolom 'Tahun' tidak ditemukan.")
+            df_json = pd.DataFrame.from_records(raw_json).rename(columns=lambda x: "Tahun" if x.strip().lower() in ["tahun", "year"] else x)
             df_json["Tahun"] = df_json["Tahun"].astype(int)
-            kolom_ebt = [c for c in df_json.columns if c != "Tahun"]
-            data_input = df_json.set_index("Tahun")[kolom_ebt].apply(pd.to_numeric, errors='coerce').dropna(how="all")
+            data_input = df_json.set_index("Tahun").apply(pd.to_numeric, errors='coerce').dropna(how="all")
 
         elif isinstance(raw_json, dict):
-            df_json = pd.DataFrame({k: pd.Series(v) for k, v in raw_json.items()})
-            df_json = df_json.rename(columns={c: "Tahun" for c in df_json.columns if c.strip().lower() in {"tahun", "year"}})
-            if "Tahun" not in df_json.columns: raise ValueError("Kolom 'Tahun' tidak ditemukan.")
+            df_json = pd.DataFrame({k: pd.Series(v) for k, v in raw_json.items()}).rename(columns=lambda x: "Tahun" if x.strip().lower() in ["tahun", "year"] else x)
             df_json["Tahun"] = df_json["Tahun"].astype(int)
-            kolom_ebt = [c for c in df_json.columns if c != "Tahun"]
-            data_input = df_json.set_index("Tahun")[kolom_ebt].apply(pd.to_numeric, errors='coerce').dropna(how="all")
+            data_input = df_json.set_index("Tahun").apply(pd.to_numeric, errors='coerce').dropna(how="all")
 
     elif file_name.endswith('.csv'):
         raw_text = file_bytes.decode("utf-8")
@@ -180,22 +165,15 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
         
         if len(df_clean.columns) == 1: 
             if 'PLTS (Surya)' in df_raw.columns: df_clean = df_raw.copy()
-            else: raise ValueError("Tidak ada parameter EBT yang ditemukan dalam CSV")
         data_input = df_clean.groupby('Tahun').mean()
 
     else:
-        try: data_input = pd.read_excel(io.BytesIO(file_bytes))
-        except Exception as e: raise ValueError(f"Gagal membaca file Excel: {e}")
-        if "Tahun" in data_input.columns: data_input = data_input.set_index("Tahun")
-        elif "tahun" in data_input.columns.str.lower():
-            col_map = {c: "Tahun" if c.lower() == "tahun" else c for c in data_input.columns}
-            data_input = data_input.rename(columns=col_map).set_index("Tahun")
-        else: raise ValueError("Kolom 'Tahun' tidak ditemukan.")
+        data_input = pd.read_excel(io.BytesIO(file_bytes))
+        col_map = {c: "Tahun" if c.lower() == "tahun" else c for c in data_input.columns}
+        data_input = data_input.rename(columns=col_map).set_index("Tahun")
 
-    if data_input.empty or len(data_input) < 2: raise ValueError("Data terlalu sedikit (minimal 2 tahun)")
     data_input.index = data_input.index.astype(int)
 
-    # ── PERBAIKAN ALGORITMA: Damped Linear Regression + Logika Musim Asli ──
     tahun_prediksi = np.arange(2025, tahun_akhir + 1)
     X_train = data_input.index.values.reshape(-1, 1).astype(float)
     X_pred = tahun_prediksi.reshape(-1, 1).astype(float)
@@ -206,8 +184,6 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
     metrics = {}
     rng = np.random.default_rng(seed=random_seed)
 
-    # Profil Musiman Spesifik Iklim Yogyakarta (Kulon Progo)
-    # 1.0 = Rata-rata tahunan. >1.0 = Musim puncak, <1.0 = Musim anjlok
     profil_musiman = {
         "surya": {1:0.85, 2:0.85, 3:0.95, 4:1.00, 5:1.10, 6:1.15, 7:1.20, 8:1.25, 9:1.15, 10:1.05, 11:0.90, 12:0.85},
         "angin": {1:0.80, 2:0.80, 3:0.90, 4:0.95, 5:1.10, 6:1.20, 7:1.30, 8:1.35, 9:1.20, 10:1.00, 11:0.90, 12:0.80},
@@ -246,32 +222,22 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
             tahun_bulan = range_bulan.year.values.astype(float).reshape(-1, 1)
             tren_bulan = model.predict(tahun_bulan)
 
-        # Seleksi Profil berdasarkan nama kolom
         kunci_profil = "default"
         if "surya" in col.lower() or "plts" in col.lower(): kunci_profil = "surya"
         elif "angin" in col.lower() or "pltb" in col.lower(): kunci_profil = "angin"
         elif "air" in col.lower() or "pltmh" in col.lower(): kunci_profil = "air"
         
-        if kunci_profil != "default":
-            pengali_musiman = np.array([profil_musiman[kunci_profil][m] for m in range_bulan.month])
-        else:
-            pengali_musiman = np.ones(len(range_bulan)) # Datar untuk biomassa
+        pengali_musiman = np.array([profil_musiman[kunci_profil][m] for m in range_bulan.month]) if kunci_profil != "default" else np.ones(len(range_bulan))
 
         noise_std = np.std(y_train) * 0.6 if np.std(y_train) > 0 else base_val * 0.1
-        noise_tahun = rng.normal(0, noise_std, len(tahun_prediksi))
-        data_ml_tahunan[col] = np.maximum(base_val * 0.2, tren_tahunan + noise_tahun)
-
-        # Menggabungkan Tren dengan Profil Musiman Alami
-        noise_bulan = rng.normal(0, base_val * 0.05, len(range_bulan))
-        prediksi_bulan = (tren_bulan * pengali_musiman) + noise_bulan
-        data_ml_bulan[col] = np.maximum(base_val * 0.1, prediksi_bulan)
+        data_ml_tahunan[col] = np.maximum(base_val * 0.2, tren_tahunan + rng.normal(0, noise_std, len(tahun_prediksi)))
+        data_ml_bulan[col] = np.maximum(base_val * 0.1, (tren_bulan * pengali_musiman) + rng.normal(0, base_val * 0.05, len(range_bulan)))
 
     return data_input, data_ml_tahunan, data_ml_bulan, metrics
 
 def get_prediction_for_year(data_ml: pd.DataFrame, tahun: int) -> pd.Series:
     if tahun in data_ml.index: return data_ml.loc[tahun]
     return data_ml.loc[data_ml.index[np.argmin(np.abs(data_ml.index - tahun))]]
-
 
 # ==========================================
 # MAIN CONTENT
@@ -284,20 +250,27 @@ if uploaded_file is not None or use_dummy_data:
         if use_dummy_data and dummy_df is not None:
             file_name = "data_dummy.csv"
             file_bytes = dummy_df.to_csv(index=False).encode('utf-8')
-            st.info("📊 Menggunakan **Data Dummy** untuk demonstrasi.")
         else:
             file_bytes = uploaded_file.getvalue()
             file_name = uploaded_file.name
 
-        data_historis, data_ml_tahunan, data_ml_bulan, metrics = process_data_and_predict(file_bytes, file_name, tahun_akhir=2060)
+        # 1. KITA SELALU PREDICT SAMPAI 2060 AGAR CEPAT (TIDAK RE-TRAIN TERUS)
+        data_historis_full, data_ml_tahunan_full, data_ml_bulan_full, metrics = process_data_and_predict(file_bytes, file_name, tahun_akhir=2060)
 
-        bins = list(range(2025, 2066, 5))
-        labels_5 = [f"{y}–{y+4}" for y in bins[:-1]]
+        # 2. LOGIKA SINKRONISASI: POTONG DATA BERDASARKAN SLIDER 'TAHUN_EVALUASI'
+        data_ml_tahunan = data_ml_tahunan_full[data_ml_tahunan_full.index <= tahun_evaluasi]
+        
+        # Ekstrak Teknologi
+        cols_teknologi = list(data_historis_full.columns)
+
+        # Bar Chart 5 Tahunan (Dinamis mengikuti slider)
         ml_copy = data_ml_tahunan.copy()
-        ml_copy['Periode'] = pd.cut(ml_copy.index, bins=bins, labels=labels_5, right=False)
-        data_5_tahun = ml_copy.groupby('Periode', observed=True).mean()
+        ml_copy['Tahun Awal'] = (ml_copy.index // 5) * 5
+        ml_copy['Periode'] = ml_copy['Tahun Awal'].astype(str) + "–" + (ml_copy['Tahun Awal'] + 4).astype(str)
+        data_5_tahun = ml_copy.groupby('Periode')[cols_teknologi].mean()
 
-        n_alt = len(data_historis.columns)
+        # Parameter MCDM
+        n_alt = len(cols_teknologi)
         base_capex = [12.0, 18.0, 22.0, 25.0, 30.0][:n_alt]
         base_emisi = [40.0, 11.0, 24.0, 230.0, 60.0][:n_alt]
         base_sosial = [90, 70, 85, 80, 75][:n_alt]
@@ -309,47 +282,50 @@ if uploaded_file is not None or use_dummy_data:
         tab1, tab2, tab3 = st.tabs(["📈 Analisis Prediksi (ML)", "⚖️ MCDM & Kebijakan", "🗺️ Peta Potensi Spasial"])
 
         with tab1:
-            st.header(f"Proyeksi Potensi Daya hingga {tahun_evaluasi}")
+            st.header(f"Proyeksi Potensi Daya (2015 hingga {tahun_evaluasi})")
             if file_name.endswith('.json'): st.success("📋 **JSON Terdeteksi!** Modul pembaca telah diperbarui.")
 
             st.subheader("📊 Evaluasi Kualitas Model (Linear Damped Regression)")
-            metrics_df = pd.DataFrame(metrics).T
-            st.dataframe(metrics_df.style.format("{:.3f}").background_gradient(subset=["R²"], cmap="RdYlGn").background_gradient(subset=["MAE"], cmap="RdYlGn_r"), use_container_width=True)
+            st.dataframe(pd.DataFrame(metrics).T.style.format("{:.3f}").background_gradient(subset=["R²"], cmap="RdYlGn").background_gradient(subset=["MAE"], cmap="RdYlGn_r"), use_container_width=True)
             st.divider()
 
-            st.write("**Histori Data vs Tren Prediksi ML (Tahunan, MW):**")
-            df_hist = data_historis.copy().reset_index()
+            # Grafik Garis Utama (Otomatis terpotong di tahun_evaluasi)
+            df_hist = data_historis_full.copy().reset_index()
             df_hist['Tipe'] = 'Historis'
             df_pred = data_ml_tahunan.copy().reset_index()
             df_pred['Tipe'] = 'Prediksi'
 
-            cols_teknologi = list(data_historis.columns)
             df_gabung = pd.concat([df_hist[['Tahun'] + cols_teknologi + ['Tipe']], df_pred[['Tahun'] + cols_teknologi + ['Tipe']]], ignore_index=True)
             df_melted = df_gabung.melt(id_vars=['Tahun', 'Tipe'], value_vars=cols_teknologi, var_name='Teknologi', value_name='MW')
 
-            fig_tren = px.line(df_melted, x='Tahun', y='MW', color='Teknologi', line_dash='Tipe', template='plotly_white', markers=True, title="Prediksi Potensi Alamiah EBT per Teknologi")
+            fig_tren = px.line(df_melted, x='Tahun', y='MW', color='Teknologi', line_dash='Tipe', template='plotly_white', markers=True, title=f"Histori Data vs Tren Prediksi ML (hingga {tahun_evaluasi})")
             fig_tren.add_vline(x=2025, line_dash='dot', line_color='red', annotation_text="Mulai Prediksi")
             fig_tren.update_layout(hovermode='x unified', yaxis_title="Potensi (MW)", xaxis_title="Tahun")
             st.plotly_chart(fig_tren, use_container_width=True)
 
             col_c1, col_c2 = st.columns(2)
             with col_c1:
-                st.write("**Tren Rata-rata Per 5 Tahun (MW):**")
-                fig_bar = px.bar(data_5_tahun.reset_index().melt(id_vars="Periode", var_name="Teknologi", value_name="MW"), x="Periode", y="MW", color="Teknologi", barmode="group", template="plotly_white", title="Rata-rata Potensi per Periode 5 Tahun")
-                fig_bar.update_layout(yaxis_title="Potensi (MW)", xaxis_title="Periode")
+                st.write(f"**Tren Rata-rata Per 5 Tahun (hingga {tahun_evaluasi}):**")
+                fig_bar = px.bar(data_5_tahun.reset_index().melt(id_vars="Periode", value_vars=cols_teknologi, var_name="Teknologi", value_name="MW"), x="Periode", y="MW", color="Teknologi", barmode="group", template="plotly_white")
+                fig_bar.update_layout(yaxis_title="Potensi (MW)", xaxis_title="Periode 5 Tahunan")
                 st.plotly_chart(fig_bar, use_container_width=True)
 
             with col_c2:
-                st.write(f"**Fluktuasi Musiman Spesifik ({tahun_evaluasi}):**")
-                data_tahun_terakhir = data_ml_bulan[data_ml_bulan.index.year == tahun_evaluasi].copy()
+                st.write(f"**Fluktuasi Musiman Spesifik (Tahun {tahun_evaluasi}):**")
+                # Grafik bulanan selalu sinkron menampilkan tahun pilihan slider
+                data_tahun_terakhir = data_ml_bulan_full[data_ml_bulan_full.index.year == tahun_evaluasi].copy()
                 if not data_tahun_terakhir.empty:
-                    data_tahun_terakhir.index = data_tahun_terakhir.index.month_name()
-                    fig_line = px.line(data_tahun_terakhir.reset_index().melt(id_vars="index", var_name="Teknologi", value_name="MW"), x="index", y="MW", color="Teknologi", template="plotly_white", title=f"Karakteristik Musiman DIY {tahun_evaluasi}")
+                    data_tahun_terakhir['Bulan'] = data_tahun_terakhir.index.strftime('%B')
+                    df_melt_bulan = data_tahun_terakhir.melt(id_vars=['Bulan'], value_vars=cols_teknologi, var_name='Teknologi', value_name='MW')
+                    
+                    fig_line = px.line(df_melt_bulan, x="Bulan", y="MW", color="Teknologi", template="plotly_white", markers=True)
+                    # Pastikan urutan bulan benar
+                    fig_line.update_xaxes(categoryorder='array', categoryarray=['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'])
                     fig_line.update_layout(yaxis_title="Potensi (MW)", xaxis_title="Bulan")
                     st.plotly_chart(fig_line, use_container_width=True)
 
         with tab2:
-            st.header("MCDM dengan Parameter Dinamis")
+            st.header(f"MCDM & Analisis Keputusan (Target: {tahun_evaluasi})")
             capex_terinflasi = capex_awal.copy() * ((1 + inflasi) ** selisih_tahun)
 
             if kebijakan == "Pajak Karbon Tinggi (Pro-Lingkungan)":
@@ -376,13 +352,13 @@ if uploaded_file is not None or use_dummy_data:
                 st.metric("Total Bobot (Setelah Normalisasi)", f"{total:.2f} → 1.00")
 
             with col_b2:
-                skor_daya = get_prediction_for_year(data_ml_tahunan, tahun_evaluasi)
+                skor_daya = get_prediction_for_year(data_ml_tahunan_full, tahun_evaluasi)
                 data_aktual = pd.DataFrame({
                     "Daya Prediksi (MW)": skor_daya.values,
                     "Investasi Terinflasi (M IDR/MW)": capex_terinflasi,
                     "Emisi (Ton CO2e/GWh)": emisi_aktual,
                     "Sosial (1-100)": sosial_aktual,
-                }, index=data_historis.columns)
+                }, index=cols_teknologi)
                 st.dataframe(data_aktual.style.format("{:.2f}").background_gradient(cmap="Blues"))
 
             norm_df = pd.DataFrame(index=data_aktual.index)
@@ -398,7 +374,7 @@ if uploaded_file is not None or use_dummy_data:
             st.subheader(f"🏆 Rekomendasi Prioritas Tahun {tahun_evaluasi}")
             col_r1, col_r2 = st.columns(2)
             with col_r1:
-                fig_rank = px.bar(hasil_df.reset_index().rename(columns={"index": "Teknologi"}), x="Skor Preferensi", y="Teknologi", orientation="h", color="Skor Preferensi", color_continuous_scale="Teal", template="plotly_white", title="Ranking Alternatif EBT")
+                fig_rank = px.bar(hasil_df.reset_index().rename(columns={"index": "Teknologi"}), x="Skor Preferensi", y="Teknologi", orientation="h", color="Skor Preferensi", color_continuous_scale="Teal", template="plotly_white")
                 fig_rank.update_layout(yaxis={"categoryorder": "total ascending"}, xaxis_title="Skor Preferensi")
                 st.plotly_chart(fig_rank, use_container_width=True)
 
@@ -415,7 +391,7 @@ if uploaded_file is not None or use_dummy_data:
                         r=vals + [vals[0]], theta=[f"{d}" for d in categories] + [categories[0]], fill='toself', name=alt,
                         hovertemplate=f"{alt}<br>" + "<br>".join([f"{cat}: %{{r:.3f}}" for cat in categories])
                     ))
-                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(w_tech, w_econ, w_env, w_soc) * 1.2])), template="plotly_white", height=400, title="Analisis Radar per Kriteria")
+                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(w_tech, w_econ, w_env, w_soc) * 1.2])), template="plotly_white", height=400, title="Analisis Radar")
                 st.plotly_chart(fig_radar, use_container_width=True)
 
             st.divider()
@@ -437,7 +413,7 @@ if uploaded_file is not None or use_dummy_data:
                             em_mult = 1.5 if sk == "Pajak Karbon Tinggi (Pro-Lingkungan)" else 1.0
                             if sk == "Subsidi Masif EBT (Pro-Ekonomi)": cap_tmp *= 0.7
                             sc = (skor_daya.values / skor_daya.values.max()) * w_tech + (cap_tmp.min() / cap_tmp) * w_econ + (emisi_aktual.min() / (emisi_aktual * em_mult)) * w_env + (sosial_aktual / sosial_aktual.max()) * w_soc
-                            for alt, s in zip(data_historis.columns, sc): chart_rows.append({"Skenario": sk, "Teknologi": alt, "Skor": round(float(s), 3)})
+                            for alt, s in zip(cols_teknologi, sc): chart_rows.append({"Skenario": sk, "Teknologi": alt, "Skor": round(float(s), 3)})
                         st.session_state.ai_chart_data = pd.DataFrame(chart_rows)
 
                         prompt_ai = f"""Anda adalah pakar transisi energi Kabupaten Kulon Progo. Berikan ringkasan SINGKAT (maks 4 kalimat per poin) berformat JSON:
@@ -464,7 +440,7 @@ Data: Tahun {tahun_evaluasi}, Skenario {kebijakan}, Inflasi {inflasi*100:.1f}%. 
             if st.session_state.ai_chart_data is not None:
                 st.divider()
                 st.subheader("📊 Perubahan Skor Antar Skenario Kebijakan")
-                fig_sc = px.bar(st.session_state.ai_chart_data, x="Teknologi", y="Skor", color="Skenario", barmode="group", template="plotly_white", title="Perbandingan Skor MCDM antar Skenario")
+                fig_sc = px.bar(st.session_state.ai_chart_data, x="Teknologi", y="Skor", color="Skenario", barmode="group", template="plotly_white")
                 fig_sc.update_layout(yaxis_title="Skor Preferensi")
                 st.plotly_chart(fig_sc, use_container_width=True)
 
@@ -483,7 +459,7 @@ Data: Tahun {tahun_evaluasi}, Skenario {kebijakan}, Inflasi {inflasi*100:.1f}%. 
                 fig_3d = go.Figure()
                 for _, row in df_lokasi.iterrows():
                     fig_3d.add_trace(go.Scatter3d(x=[row['Lon']], y=[row['Lat']], z=[row['Elevasi']], mode='markers+text', marker=dict(size=row['Potensi_MW'] * 1.2, color=color_map.get(row['Teknologi'], "#fff"), opacity=0.85, line=dict(width=0.5, color='white')), text=[f"<b>{row['Teknologi']}</b><br>{row['Potensi_MW']} MW"], textposition="top center", name=row['Teknologi']))
-                fig_3d.update_layout(scene=dict(bgcolor="rgb(10,15,30)", xaxis=dict(gridcolor="#1e3a5f", title="Longitude"), yaxis=dict(gridcolor="#1e3a5f", title="Latitude"), zaxis=dict(gridcolor="#1e3a5f", title="Elevasi (m)")), template="plotly_dark", height=600, title="Visualisasi 3D Potensi EBT Kulon Progo")
+                fig_3d.update_layout(scene=dict(bgcolor="rgb(10,15,30)", xaxis=dict(gridcolor="#1e3a5f", title="Longitude"), yaxis=dict(gridcolor="#1e3a5f", title="Latitude"), zaxis=dict(gridcolor="#1e3a5f", title="Elevasi (m)")), template="plotly_dark", height=600)
                 st.plotly_chart(fig_3d, use_container_width=True)
 
             st.divider()
@@ -492,7 +468,7 @@ Data: Tahun {tahun_evaluasi}, Skenario {kebijakan}, Inflasi {inflasi*100:.1f}%. 
 
             st.subheader("🗓️ Timeline Optimal Pembangunan vs Siklus APBN")
             timeline_data = [{"Teknologi": r['Teknologi'], "Mulai": int(r["Waktu_Optimal"].split("-")[0]), "Selesai": int(r["Waktu_Optimal"].split("-")[1]), "APBN": r["APBN_Tahap"], "MW": r["Potensi_MW"]} for _, r in df_lokasi.iterrows()]
-            fig_tl = px.timeline(pd.DataFrame(timeline_data).assign(Mulai=lambda df: pd.to_datetime(df["Mulai"].astype(str) + "-01-01"), Selesai=lambda df: pd.to_datetime(df["Selesai"].astype(str) + "-12-31")), x_start="Mulai", x_end="Selesai", y="Teknologi", color="APBN", template="plotly_white", title="Timeline Pembangunan Infrastruktur EBT")
+            fig_tl = px.timeline(pd.DataFrame(timeline_data).assign(Mulai=lambda df: pd.to_datetime(df["Mulai"].astype(str) + "-01-01"), Selesai=lambda df: pd.to_datetime(df["Selesai"].astype(str) + "-12-31")), x_start="Mulai", x_end="Selesai", y="Teknologi", color="APBN", template="plotly_white")
             fig_tl.update_yaxes(autorange="reversed")
             st.plotly_chart(fig_tl, use_container_width=True)
 
