@@ -56,14 +56,10 @@ if st.sidebar.button("🎲 Generate Contoh Data Dummy"):
     
     st.session_state['dummy_file'] = csv_dummy
     st.success("✅ Data dummy berhasil dibuat! Silakan download dan upload kembali, atau gunakan langsung.")
-    
-    # Auto-load data dummy
-    if 'dummy_file' in st.session_state:
-        uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv", "json"], 
-                                                  value=st.session_state['dummy_file'],
-                                                  key="dummyUploader")
 
 st.sidebar.divider()
+
+uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv", "json"], key="mainUploader")
 
 st.sidebar.header("🌍 2. Asumsi Makro & Kebijakan")
 inflasi = st.sidebar.number_input("Tingkat Inflasi Tahunan (%)", min_value=0.0, max_value=15.0, value=3.5, step=0.1) / 100
@@ -340,10 +336,22 @@ def get_prediction_for_year(data_ml: pd.DataFrame, tahun: int) -> pd.Series:
 # ==========================================
 # MAIN CONTENT
 # ==========================================
-if uploaded_file is not None:
+
+# Cek apakah ada data dummy yang aktif
+use_dummy_data = st.session_state.get('use_dummy', False)
+dummy_df = st.session_state.get('data_dummy', None)
+
+if uploaded_file is not None or use_dummy_data:
     try:
-        file_bytes = uploaded_file.getvalue()
-        file_name = uploaded_file.name
+        if use_dummy_data and dummy_df is not None:
+            # Gunakan data dummy langsung
+            file_name = "data_dummy.csv"
+            file_bytes = dummy_df.to_csv(index=False).encode('utf-8')
+            st.info("📊 Menggunakan **Data Dummy** untuk demonstrasi.")
+        else:
+            # Gunakan file yang diupload
+            file_bytes = uploaded_file.getvalue()
+            file_name = uploaded_file.name
 
         data_historis, data_ml_tahunan, data_ml_bulan, metrics = process_data_and_predict(
             file_bytes, file_name, tahun_akhir=2060
