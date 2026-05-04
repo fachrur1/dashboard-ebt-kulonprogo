@@ -70,146 +70,131 @@ df_lokasi = pd.DataFrame(LOKASI_EBT)
 # FUNGSI SMART PARSER & MACHINE LEARNING
 # ==========================================
 @st.cache_data
-def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_seed=42):
+def process_data_and_predict(file_bytes, file_name, kebijakan, tahun_akhir=2060, random_seed=42):
+    import numpy as np
+    import pandas as pd
+    import json, io
+    from sklearn.linear_model import LinearRegression
+
     np.random.seed(random_seed)
 
+    # ==========================================
+    # SCENARIO CONFIG (HYBRID MODEL)
+    # ==========================================
+    SCENARIO_CONFIG = {
+        "Business as Usual (BAU)": {"growth_rate": 0.03, "cap_multiplier": 2.0},
+        "Pajak Karbon Tinggi (Pro-Lingkungan)": {"growth_rate": 0.06, "cap_multiplier": 3.0},
+        "Subsidi Masif EBT (Pro-Ekonomi)": {"growth_rate": 0.08, "cap_multiplier": 3.5},
+    }
+
+    config = SCENARIO_CONFIG.get(kebijakan, SCENARIO_CONFIG["Business as Usual (BAU)"])
+    growth_rate = config["growth_rate"]
+    cap_multiplier = config["cap_multiplier"]
+
+    # ==========================================
+    # LOAD DATA
+    # ==========================================
     if file_name.endswith('.json'):
         raw_json = json.loads(file_bytes.decode("utf-8"))
-        is_nasa_geojson = (
-            isinstance(raw_json, dict)
-            and raw_json.get("type") == "Feature"
-            and "properties" in raw_json
-            and "parameter" in raw_json.get("properties", {})
-        )
 
-        if is_nasa_geojson:
+        if isinstance(raw_json, dict) and "properties" in raw_json:
             NASA_MAP = {
                 "ALLSKY_SFC_SW_DWN": ("PLTS (Surya)", 3.5),
-                "WS10M":             ("PLTB (Angin)", 2.8),
-                "PRECTOTCORR":       ("PLTMH (Air)",  1.5),
+                "WS10M": ("PLTB (Angin)", 2.8),
+                "PRECTOTCORR": ("PLTMH (Air)", 1.5),
             }
-            fill_val = raw_json.get("header", {}).get("fill_value", -999)
-            params   = raw_json["properties"]["parameter"]
 
-            # Cek format Climatology vs Time Series
-            sample_param = list(params.values())[0]
-            sample_keys = list(sample_param.keys())
-            is_climatology = any(k in ["JAN", "FEB", "ANN"] for k in sample_keys)
-
+            params = raw_json["properties"]["parameter"]
             year_data = {}
 
-            if is_climatology:
-                # Logika Parser Climatology
-                for param_key, monthly in params.items():
-                    if param_key not in NASA_MAP: continue
-                    col_name, factor = NASA_MAP[param_key]
-                    
-                    if "ANN" in monthly and monthly["ANN"] != fill_val:
-                        ann_val = monthly["ANN"] * factor
-                    else:
-                        valid_vals = [v for k, v in monthly.items() if k not in ["ANN", "DJF", "MAM", "JJA", "SON"] and v != fill_val]
-                        ann_val = np.mean(valid_vals) * factor if valid_vals else 0
-                    
-                    # Bangun mock data historis (10 tahun) agar regresi polinomial bisa dilatih
-                    for yr in range(2015, 2025):
-                        year_data.setdefault(yr, {})[col_name] = ann_val
-            else:
-                # Logika Parser Time Series
-                for param_key, monthly in params.items():
-                    if param_key not in NASA_MAP: continue
-                    col_name, factor = NASA_MAP[param_key]
-                    for k, v in monthly.items():
-                        month = int(k[4:])
-                        if month == 13 or v == fill_val or v is None: continue 
-                        year = int(k[:4])
-                        year_data.setdefault(year, {}).setdefault(col_name, []).append(v * factor)
-                
-                # Rata-rata per tahun
-                for yr in year_data:
-                    for col in year_data[yr]:
-                        if isinstance(year_data[yr][col], list):
-                            year_data[yr][col] = float(np.mean(year_data[yr][col]))
+            for param_key, monthly in params.items():
+                if param_key not in NASA_MAP:
+                    continue
+                col_name, factor = NASA_MAP[param_key]
 
-            if not year_data:
-                raise ValueError("Data JSON NASA tidak mengandung parameter EBT yang dibutuhkan.")
+                if "ANN" in monthly:
+                    year_data[2024] = {col_name: monthly["ANN"] * factor}
 
-            records = [{"Tahun": yr, **cols} for yr, cols in sorted(year_data.items())]
-            data_input = pd.DataFrame.from_records(records).set_index("Tahun")
+            data_input = pd.DataFrame.from_dict(year_data, orient='index')
 
-        elif isinstance(raw_json, list):
-            df_json = pd.DataFrame.from_records(raw_json)
-            df_json = df_json.rename(columns={c: "Tahun" for c in df_json.columns if c.strip().lower() in {"tahun", "year"}})
+        else:
+            df_json = pd.DataFrame(raw_json)
             df_json["Tahun"] = df_json["Tahun"].astype(int)
-            kolom_ebt = [c for c in df_json.columns if c != "Tahun"]
-            data_input = df_json.set_index("Tahun")[kolom_ebt].apply(pd.to_numeric, errors='coerce').dropna(how="all")
-
-        elif isinstance(raw_json, dict):
-            df_json = pd.DataFrame({k: pd.Series(v) for k, v in raw_json.items()})
-            df_json = df_json.rename(columns={c: "Tahun" for c in df_json.columns if c.strip().lower() in {"tahun", "year"}})
-            df_json["Tahun"] = df_json["Tahun"].astype(int)
-            kolom_ebt = [c for c in df_json.columns if c != "Tahun"]
-            data_input = df_json.set_index("Tahun")[kolom_ebt].apply(pd.to_numeric, errors='coerce').dropna(how="all")
+            data_input = df_json.set_index("Tahun")
 
     elif file_name.endswith('.csv'):
         raw_text = file_bytes.decode("utf-8")
-        skip_rows = 0
-        for i, line in enumerate(raw_text.split('\n')):
-            if "-END HEADER-" in line or ("YEAR" in line and "MO" in line):
-                skip_rows = i + 1 if "-END HEADER-" in line else i
-                break
-        df_raw = pd.read_csv(io.StringIO(raw_text), skiprows=skip_rows)
-        df_raw = df_raw.replace(-999.0, np.nan).ffill().bfill()
-        
+        df_raw = pd.read_csv(io.StringIO(raw_text))
+
         df_clean = pd.DataFrame({'Tahun': df_raw['YEAR'].astype(int)})
-        if 'ALLSKY_SFC_SW_DWN' in df_raw.columns: df_clean['PLTS (Surya)'] = df_raw['ALLSKY_SFC_SW_DWN'] * 3.5
-        if 'WS10M' in df_raw.columns: df_clean['PLTB (Angin)'] = df_raw['WS10M'] * 2.8
-        if 'PRECTOTCORR' in df_raw.columns: df_clean['PLTMH (Air)'] = df_raw['PRECTOTCORR'] * 1.5
-        data_input = df_clean.groupby('Tahun').mean()
+        if 'ALLSKY_SFC_SW_DWN' in df_raw.columns:
+            df_clean['PLTS (Surya)'] = df_raw['ALLSKY_SFC_SW_DWN'] * 3.5
+        if 'WS10M' in df_raw.columns:
+            df_clean['PLTB (Angin)'] = df_raw['WS10M'] * 2.8
+        if 'PRECTOTCORR' in df_raw.columns:
+            df_clean['PLTMH (Air)'] = df_raw['PRECTOTCORR'] * 1.5
+
+        data_input = df_clean.groupby("Tahun").mean()
 
     else:
         data_input = pd.read_excel(io.BytesIO(file_bytes))
-        if "Tahun" in data_input.columns: data_input = data_input.set_index("Tahun")
+        data_input = data_input.set_index("Tahun")
 
     data_input.index = data_input.index.astype(int)
 
-    # ── MACHINE LEARNING: Polynomial Regression ────────────────────────────────
+    # ==========================================
+    # HYBRID MODEL
+    # ==========================================
     tahun_prediksi = np.arange(2025, tahun_akhir + 1)
-    X_train = data_input.index.values.reshape(-1, 1).astype(float)
-    X_pred  = tahun_prediksi.reshape(-1, 1).astype(float)
+    X_train = data_input.index.values.reshape(-1, 1)
+    X_pred = tahun_prediksi.reshape(-1, 1)
 
-    data_ml_tahunan = pd.DataFrame(index=pd.Index(tahun_prediksi, name='Tahun'))
+    data_ml_tahunan = pd.DataFrame(index=tahun_prediksi)
     range_bulan = pd.date_range(start="2025-01-01", end=f"{tahun_akhir}-12-31", freq="MS")
     data_ml_bulan = pd.DataFrame(index=range_bulan)
+
     metrics = {}
-    rng = np.random.default_rng(seed=random_seed)
 
     for col in data_input.columns:
-        y_train = data_input[col].values.astype(float)
-        base_val = float(np.mean(y_train))
-        noise_std = np.std(y_train) * 0.3 
+        y_train = data_input[col].values
 
+        # --- LINEAR TREND (STABLE)
         model = LinearRegression()
         model.fit(X_train, y_train)
-        
         trend = model.predict(X_pred)
-        
-        # Tambahkan batas maksimum (realistis)
-        max_cap = np.max(y_train) * 2.5  # asumsi growth max 2.5x historis
-        
-        trend = np.clip(trend, 0, max_cap)
 
-        y_pred_hist = pipeline.predict(X_train)
-        metrics[col] = {"R²": round(r2_score(y_train, y_pred_hist), 3), "MAE": round(mean_absolute_error(y_train, y_pred_hist), 3)}
+        # --- POLICY GROWTH
+        years_offset = tahun_prediksi - 2025
+        policy_growth = np.exp(growth_rate * years_offset)
 
-        tren_tahunan = pipeline.predict(X_pred)
-        noise_tahun = rng.normal(0, noise_std, len(tahun_prediksi))
-        data_ml_tahunan[col] = np.maximum(0, tren_tahunan + noise_tahun)
+        # --- HYBRID
+        hybrid = trend * policy_growth
 
-        tahun_bulan = range_bulan.year.values.astype(float).reshape(-1, 1)
-        tren_bulan = pipeline.predict(tahun_bulan)
-        seasonality = 0.2 * base_val * np.sin(2 * np.pi * range_bulan.month / 12)
-        noise_bulan = rng.normal(0, base_val * 0.05, len(range_bulan))
-        data_ml_bulan[col] = np.maximum(0, tren_bulan + seasonality + noise_bulan)
+        # --- CONSTRAINT (REALISTIC LIMIT)
+        max_cap = np.max(y_train) * cap_multiplier
+        hybrid = np.clip(hybrid, 0, max_cap)
+
+        # --- NOISE KECIL
+        noise = np.random.normal(0, np.std(y_train) * 0.03, len(hybrid))
+        hybrid = np.maximum(0, hybrid + noise)
+
+        data_ml_tahunan[col] = hybrid
+
+        # --- BULANAN
+        base_val = np.mean(y_train)
+        trend_bulan = np.interp(range_bulan.year, tahun_prediksi, hybrid)
+
+        seasonality = 0.1 * base_val * np.sin(2 * np.pi * range_bulan.month / 12)
+        noise_bulan = np.random.normal(0, base_val * 0.03, len(range_bulan))
+
+        data_ml_bulan[col] = np.maximum(0, trend_bulan + seasonality + noise_bulan)
+
+        # --- METRICS
+        y_pred_train = model.predict(X_train)
+        metrics[col] = {
+            "R²": round(float(1 - np.sum((y_train - y_pred_train)**2) / np.sum((y_train - np.mean(y_train))**2)), 3),
+            "MAE": round(float(np.mean(np.abs(y_train - y_pred_train))), 3)
+        }
 
     return data_input, data_ml_tahunan, data_ml_bulan, metrics
 
@@ -227,7 +212,7 @@ if uploaded_file is not None:
         file_bytes = uploaded_file.getvalue()
         file_name  = uploaded_file.name
 
-        data_historis, data_ml_tahunan, data_ml_bulan, metrics = process_data_and_predict(file_bytes, file_name, tahun_akhir=2060)
+        data_historis, data_ml_tahunan, data_ml_bulan, metrics = process_data_and_predict(file_bytes, file_name, kebijakan, tahun_akhir=2060)
 
         # Ringkasan 5 Tahun
         bins = list(range(2025, 2066, 5))
