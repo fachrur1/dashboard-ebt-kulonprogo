@@ -155,14 +155,17 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
                 "{\"Tahun\":[2020,...], ...}."
             )
 
-        # Cari kolom tahun (case-insensitive)
+        # Cari kolom tahun — cocokkan "tahun" ATAU "year" (case-insensitive, strip spasi)
+        ALIAS_TAHUN = {"tahun", "year"}
         tahun_col = next(
-            (c for c in df_json.columns if c.strip().lower() == "tahun"), None
+            (c for c in df_json.columns if c.strip().lower() in ALIAS_TAHUN), None
         )
         if tahun_col is None:
+            kolom_terdeteksi = ", ".join(f'"{c}"' for c in df_json.columns)
             raise ValueError(
-                "File JSON harus memiliki kolom 'Tahun' "
-                "(sebagai kunci tahun data historis)."
+                f"File JSON tidak memiliki kolom tahun. "
+                f"Kolom yang terdeteksi: [{kolom_terdeteksi}]. "
+                f"Tambahkan kolom bernama 'Tahun' atau 'Year' (tidak case-sensitive)."
             )
 
         df_json = df_json.rename(columns={tahun_col: "Tahun"})
@@ -298,6 +301,25 @@ if uploaded_file is not None:
     try:
         file_bytes = uploaded_file.getvalue()
         file_name  = uploaded_file.name
+
+        # Debug info khusus JSON — tampilkan struktur file sebelum diproses
+        if file_name.endswith('.json'):
+            with st.expander("🔍 Debug JSON — klik untuk lihat struktur file yang terbaca", expanded=False):
+                try:
+                    raw_preview = json.loads(file_bytes.decode("utf-8"))
+                    if isinstance(raw_preview, list):
+                        st.write(f"**Tipe:** Array of objects ({len(raw_preview)} baris)")
+                        st.write(f"**Kolom terdeteksi:** {list(raw_preview[0].keys()) if raw_preview else '(kosong)'}")
+                        st.json(raw_preview[:3])  # tampilkan 3 baris pertama
+                    elif isinstance(raw_preview, dict):
+                        st.write(f"**Tipe:** Object of arrays")
+                        st.write(f"**Key terdeteksi:** {list(raw_preview.keys())}")
+                        preview = {k: v[:3] if isinstance(v, list) else v for k, v in raw_preview.items()}
+                        st.json(preview)
+                    else:
+                        st.write(f"**Tipe tidak dikenal:** {type(raw_preview)}")
+                except Exception as json_err:
+                    st.error(f"File tidak bisa di-parse sebagai JSON: {json_err}")
 
         data_historis, data_ml_tahunan, data_ml_bulan, metrics = process_data_and_predict(
             file_bytes, file_name, tahun_akhir=2060
