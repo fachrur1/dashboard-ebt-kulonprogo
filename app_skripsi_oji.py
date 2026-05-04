@@ -13,8 +13,6 @@ import plotly.graph_objects as go
 import json
 import io
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.pipeline import Pipeline
 from sklearn.metrics import r2_score, mean_absolute_error
 
 # ==========================================
@@ -48,15 +46,13 @@ st.sidebar.caption("Support: Excel (.xlsx), NASA POWER Time Series (.csv/.json),
 
 # Tombol untuk generate data dummy
 if st.sidebar.button("🎲 Generate Contoh Data Dummy"):
-    # Buat data dummy yang realistis
     np.random.seed(42)
     years = list(range(2015, 2025))
     data_dummy = {
         'Tahun': years,
-        'PLTS (Surya)': [3.2, 3.5, 3.8, 4.1, 4.3, 4.6, 4.9, 5.2, 5.4, 5.7],
-        'PLTB (Angin)': [2.1, 2.3, 2.4, 2.6, 2.7, 2.9, 3.0, 3.2, 3.3, 3.5],
-        'PLTMH (Air)': [1.2, 1.3, 1.4, 1.5, 1.5, 1.6, 1.7, 1.8, 1.8, 1.9],
-        'Biomassa': [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.5, 1.6]
+        'PLTS (Surya)': [15.2, 15.5, 15.8, 16.1, 16.3, 16.6, 16.9, 17.2, 17.4, 17.7],
+        'PLTB (Angin)': [12.1, 12.3, 12.4, 12.6, 12.7, 12.9, 13.0, 13.2, 13.3, 13.5],
+        'PLTMH (Air)': [18.2, 18.3, 18.4, 18.5, 18.5, 18.6, 18.7, 18.8, 18.8, 18.9],
     }
     df_dummy = pd.DataFrame(data_dummy)
     
@@ -123,16 +119,15 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
         )
 
         if is_nasa_geojson:
-            # NASA POWER GeoJSON Format
+            # Mengembalikan Faktor Konversi Logis (MW)
             NASA_MAP = {
-                "ALLSKY_SFC_SW_DWN": ("PLTS (Surya)", 0.0036),  # MJ/m²/day → MW (faktor konversi realistis)
-                "WS10M": ("PLTB (Angin)", 0.15),                # m/s → MW (faktor konversi realistis)
-                "PRECTOTCORR": ("PLTMH (Air)", 0.05),          # mm/day → MW (faktor konversi realistis)
+                "ALLSKY_SFC_SW_DWN": ("PLTS (Surya)", 3.5),  
+                "WS10M": ("PLTB (Angin)", 2.8),               
+                "PRECTOTCORR": ("PLTMH (Air)", 1.5),         
             }
             fill_val = raw_json.get("header", {}).get("fill_value", -999)
             params = raw_json["properties"]["parameter"]
 
-            # Cek format Climatology vs Time Series
             sample_param = list(params.values())[0]
             sample_keys = list(sample_param.keys())
             is_climatology = any(k in ["JAN", "FEB", "ANN"] for k in sample_keys)
@@ -140,7 +135,6 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
             year_data = {}
 
             if is_climatology:
-                # Logika Parser Climatology - ambil nilai tahunan rata-rata
                 for param_key, monthly in params.items():
                     if param_key not in NASA_MAP:
                         continue
@@ -153,12 +147,10 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
                                       if k not in ["ANN", "DJF", "MAM", "JJA", "SON"] and v != fill_val]
                         ann_val = np.mean(valid_vals) * factor if valid_vals else 0
                     
-                    # Bangun mock data historis (10 tahun) dengan variasi kecil
                     for yr in range(2015, 2025):
                         noise = np.random.normal(0, ann_val * 0.05)
                         year_data.setdefault(yr, {})[col_name] = max(0, ann_val + noise)
             else:
-                # Logika Parser Time Series
                 for param_key, monthly in params.items():
                     if param_key not in NASA_MAP:
                         continue
@@ -175,7 +167,6 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
                         
                         year_data.setdefault(year, {}).setdefault(col_name, []).append(v * factor)
                 
-                # Rata-rata per tahun
                 for yr in year_data:
                     for col in year_data[yr]:
                         if isinstance(year_data[yr][col], list):
@@ -188,7 +179,6 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
             data_input = pd.DataFrame.from_records(records).set_index("Tahun")
 
         elif isinstance(raw_json, list):
-            # JSON array format
             df_json = pd.DataFrame.from_records(raw_json)
             df_json = df_json.rename(columns={c: "Tahun" for c in df_json.columns 
                                                if c.strip().lower() in {"tahun", "year"}})
@@ -199,7 +189,6 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
             data_input = df_json.set_index("Tahun")[kolom_ebt].apply(pd.to_numeric, errors='coerce').dropna(how="all")
 
         elif isinstance(raw_json, dict):
-            # JSON object format
             df_json = pd.DataFrame({k: pd.Series(v) for k, v in raw_json.items()})
             df_json = df_json.rename(columns={c: "Tahun" for c in df_json.columns 
                                                if c.strip().lower() in {"tahun", "year"}})
@@ -212,7 +201,6 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
             raise ValueError("Format JSON tidak dikenali")
 
     elif file_name.endswith('.csv'):
-        # CSV parsing dengan handling header NASA POWER
         raw_text = file_bytes.decode("utf-8")
         skip_rows = 0
         for i, line in enumerate(raw_text.split('\n')):
@@ -225,19 +213,18 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
         
         df_clean = pd.DataFrame({'Tahun': df_raw['YEAR'].astype(int)})
         
-        # Konversi parameter NASA ke MW dengan faktor realistis
+        # Mengembalikan Faktor Konversi Logis (MW)
         conversion_factors = {
-            'ALLSKY_SFC_SW_DWN': ('PLTS (Surya)', 0.0036),
-            'WS10M': ('PLTB (Angin)', 0.15),
-            'PRECTOTCORR': ('PLTMH (Air)', 0.05)
+            'ALLSKY_SFC_SW_DWN': ('PLTS (Surya)', 3.5),
+            'WS10M': ('PLTB (Angin)', 2.8),
+            'PRECTOTCORR': ('PLTMH (Air)', 1.5)
         }
         
         for nasa_col, (new_col, factor) in conversion_factors.items():
             if nasa_col in df_raw.columns:
                 df_clean[new_col] = df_raw[nasa_col] * factor
         
-        if len(df_clean.columns) == 1:  # Hanya kolom Tahun
-            # Jika tidak ada header NASA, asumsikan ini csv biasa (misal dari generate dummy)
+        if len(df_clean.columns) == 1: 
             if 'PLTS (Surya)' in df_raw.columns:
                 df_clean = df_raw.copy()
             else:
@@ -246,7 +233,6 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
         data_input = df_clean.groupby('Tahun').mean()
 
     else:
-        # Excel format
         try:
             data_input = pd.read_excel(io.BytesIO(file_bytes))
         except Exception as e:
@@ -260,13 +246,12 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
         else:
             raise ValueError("Kolom 'Tahun' tidak ditemukan dalam file Excel")
 
-    # Validasi data
     if data_input.empty or len(data_input) < 2:
         raise ValueError("Data terlalu sedikit untuk dilakukan prediksi (minimal 2 tahun)")
 
     data_input.index = data_input.index.astype(int)
 
-    # ── MACHINE LEARNING: Polynomial Regression dengan Validasi ────────────────────────────────
+    # ── MACHINE LEARNING REVISION: Damped Linear Regression ────────────────────────────────
     tahun_prediksi = np.arange(2025, tahun_akhir + 1)
     X_train = data_input.index.values.reshape(-1, 1).astype(float)
     X_pred = tahun_prediksi.reshape(-1, 1).astype(float)
@@ -279,65 +264,63 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
 
     for col in data_input.columns:
         y_train = data_input[col].values.astype(float)
+        base_val = float(np.mean(y_train))
         
-        # Handle data dengan variansi nol
+        # Jika data statis murni
         if np.std(y_train) == 0:
-            base_val = float(np.mean(y_train))
             data_ml_tahunan[col] = base_val
             data_ml_bulan[col] = base_val
             metrics[col] = {"R²": 1.0, "MAE": 0.0}
             continue
             
-        base_val = float(np.mean(y_train))
-        noise_std = np.std(y_train) * 0.3 
+        # Gunakan Linear Regression yang stabil
+        model = LinearRegression()
+        model.fit(X_train, y_train)
 
-        # Adaptive polynomial degree based on data length
-        n_samples = len(y_train)
-        if n_samples < 5:
-            degree = 1
-        elif n_samples < 10:
-            degree = 2
-        else:
-            degree = min(3, n_samples // 3)
-
-        pipeline = Pipeline([
-            ('poly', PolynomialFeatures(degree=degree, include_bias=False)),
-            ('reg', LinearRegression())
-        ])
-        
-        try:
-            pipeline.fit(X_train, y_train)
-        except Exception as e:
-            st.warning(f"Model training gagal untuk {col}: {e}. Menggunakan fallback linear.")
-            pipeline = Pipeline([
-                ('poly', PolynomialFeatures(degree=1, include_bias=False)),
-                ('reg', LinearRegression())
-            ])
-            pipeline.fit(X_train, y_train)
-
-        y_pred_hist = pipeline.predict(X_train)
+        y_pred_hist = model.predict(X_train)
         metrics[col] = {
             "R²": round(r2_score(y_train, y_pred_hist), 3), 
             "MAE": round(mean_absolute_error(y_train, y_pred_hist), 3)
         }
 
-        tren_tahunan = pipeline.predict(X_pred)
+        # Ekstrapolasi Mentah
+        tren_tahunan_mentah = model.predict(X_pred)
         
-        # Apply realistic bounds to prevent unrealistic predictions
-        max_historis = np.max(y_train) * 3  # Maksimum 3x nilai historis tertinggi
-        min_historis = np.min(y_train) * 0.5  # Minimum 50% dari nilai historis terendah
-        
-        noise_tahun = rng.normal(0, noise_std, len(tahun_prediksi))
-        prediksi_dengan_noise = tren_tahunan + noise_tahun
-        data_ml_tahunan[col] = np.clip(prediksi_dengan_noise, min_historis, max_historis)
+        # ALGORITMA DAMPING: Mencegah grafik meledak atau nyungsep (mencegah clipping flat)
+        # Cuaca/Iklim tidak akan berubah lebih dari ~20% dari rata-rata historis
+        val_akhir = tren_tahunan_mentah[-1]
+        batas_atas = base_val * 1.20
+        batas_bawah = base_val * 0.80
 
-        # Monthly prediction with seasonality
-        tahun_bulan = range_bulan.year.values.astype(float).reshape(-1, 1)
-        tren_bulan = pipeline.predict(tahun_bulan)
+        if val_akhir > batas_atas or val_akhir < batas_bawah:
+            # Jika tren terlalu tajam, kita buat kemiringan baru yang lebih natural menuju batas
+            target_val = batas_atas if val_akhir > batas_atas else batas_bawah
+            start_val = model.predict([[tahun_prediksi[0]]])[0]
+            slope_baru = (target_val - start_val) / len(tahun_prediksi)
+            tren_tahunan = start_val + slope_baru * np.arange(len(tahun_prediksi))
+            
+            # Sama halnya untuk data bulanan
+            tahun_bulan = range_bulan.year.values.astype(float).reshape(-1, 1)
+            tren_bulan = start_val + slope_baru * (tahun_bulan[:, 0] - tahun_prediksi[0])
+        else:
+            tren_tahunan = tren_tahunan_mentah
+            tahun_bulan = range_bulan.year.values.astype(float).reshape(-1, 1)
+            tren_bulan = model.predict(tahun_bulan)
+
+        # Tambahkan Fluktuasi Natural (Noise)
+        noise_std = np.std(y_train) * 0.6 if np.std(y_train) > 0 else base_val * 0.1
+        noise_tahun = rng.normal(0, noise_std, len(tahun_prediksi))
+        
+        # Gabungkan tren dan noise. Tidak ada lagi np.clip yang membuat garis datar kaku.
+        prediksi_akhir = tren_tahunan + noise_tahun
+        # Hanya jaga agar tidak bernilai negatif
+        data_ml_tahunan[col] = np.maximum(base_val * 0.2, prediksi_akhir)
+
+        # Prediksi Bulanan (Seasonality)
         seasonality = 0.15 * base_val * np.sin(2 * np.pi * range_bulan.month / 12)
         noise_bulan = rng.normal(0, base_val * 0.05, len(range_bulan))
         prediksi_bulan = tren_bulan + seasonality + noise_bulan
-        data_ml_bulan[col] = np.clip(prediksi_bulan, min_historis, max_historis)
+        data_ml_bulan[col] = np.maximum(base_val * 0.2, prediksi_bulan)
 
     return data_input, data_ml_tahunan, data_ml_bulan, metrics
 
@@ -352,19 +335,16 @@ def get_prediction_for_year(data_ml: pd.DataFrame, tahun: int) -> pd.Series:
 # MAIN CONTENT
 # ==========================================
 
-# Cek apakah ada data dummy yang aktif
 use_dummy_data = st.session_state.get('use_dummy', False)
 dummy_df = st.session_state.get('data_dummy', None)
 
 if uploaded_file is not None or use_dummy_data:
     try:
         if use_dummy_data and dummy_df is not None:
-            # Gunakan data dummy langsung
             file_name = "data_dummy.csv"
             file_bytes = dummy_df.to_csv(index=False).encode('utf-8')
             st.info("📊 Menggunakan **Data Dummy** untuk demonstrasi.")
         else:
-            # Gunakan file yang diupload
             file_bytes = uploaded_file.getvalue()
             file_name = uploaded_file.name
 
@@ -397,7 +377,7 @@ if uploaded_file is not None or use_dummy_data:
             if file_name.endswith('.json'):
                 st.success("📋 **JSON Terdeteksi!** Modul pembaca telah diperbarui untuk mendukung format **NASA POWER Time Series** maupun **NASA POWER Climatology**. Data klimatologi direkonstruksi secara ekuivalen agar bisa diproses regresi ML.")
 
-            st.subheader("📊 Evaluasi Kualitas Model (Polynomial Regression)")
+            st.subheader("📊 Evaluasi Kualitas Model (Linear Damped Regression)")
             metrics_df = pd.DataFrame(metrics).T
             st.dataframe(
                 metrics_df.style.format("{:.3f}")
@@ -413,17 +393,13 @@ if uploaded_file is not None or use_dummy_data:
             df_pred = data_ml_tahunan.copy().reset_index()
             df_pred['Tipe'] = 'Prediksi'
 
-            # Ambil hanya kolom teknologi (numeric) dari data historis
             cols_teknologi = list(data_historis.columns)
             
-            # Pastikan urutan kolom sama dan tidak ada duplikat di kedua dataframe
             df_hist_plot = df_hist[['Tahun'] + cols_teknologi + ['Tipe']].copy()
             df_pred_plot = df_pred[['Tahun'] + cols_teknologi + ['Tipe']].copy()
             
-            # Gabungkan
             df_gabung = pd.concat([df_hist_plot, df_pred_plot], ignore_index=True)
 
-            # Melt untuk plotly - tentukan value_vars secara eksplisit untuk menghindari duplikat
             df_melted = df_gabung.melt(
                 id_vars=['Tahun', 'Tipe'], 
                 value_vars=cols_teknologi,
@@ -436,7 +412,7 @@ if uploaded_file is not None or use_dummy_data:
                 x='Tahun', y='MW', color='Teknologi', line_dash='Tipe',
                 template='plotly_white',
                 markers=True,
-                title=f"Prediksi Potensi EBT per Teknologi (2015-2060)" # <--- FIX DI SINI
+                title="Prediksi Potensi Alamiah EBT per Teknologi"
             )
             fig_tren.add_vline(x=2025, line_dash='dot', line_color='red', annotation_text="Mulai Prediksi")
             fig_tren.update_layout(hovermode='x unified', yaxis_title="Potensi (MW)", xaxis_title="Tahun")
@@ -754,9 +730,4 @@ else:
     3. **Analisis ML**: Lihat prediksi potensi EBT hingga tahun 2060
     4. **MCDM**: Evaluasi alternatif berdasarkan kriteria teknis, ekonomi, lingkungan, dan sosial
     5. **Peta**: Visualisasikan potensi spasial EBT di Kulon Progo
-    
-    ### 📊 Format Data yang Didukung:
-    - **NASA POWER CSV**: File time series dengan parameter seperti ALLSKY_SFC_SW_DWN, WS10M, PRECTOTCORR
-    - **NASA POWER JSON**: Format GeoJSON climatology atau time series
-    - **Excel**: Tabel dengan kolom 'Tahun' dan nama teknologi EBT sebagai kolom lainnya
     """)
