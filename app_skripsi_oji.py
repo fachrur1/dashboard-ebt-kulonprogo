@@ -75,16 +75,32 @@ def process_data_and_predict(file):
                 break
                 
         df_raw = pd.read_csv(io.StringIO(raw_text), skiprows=skip_rows)
+        
+        # VALIDASI FILE: Pastikan ini benar-benar file data cuaca, bukan kamus NASA
+        if 'YEAR' not in df_raw.columns:
+            raise ValueError("File CSV yang diunggah sepertinya bukan data historis cuaca. Pastikan Anda mengunduh data 'Time Series' dari portal NASA POWER yang memiliki kolom 'YEAR', 'MO', 'DY'.")
+            
+        # Membersihkan data null NASA (-999.0)
         df_raw = df_raw.replace(-999.0, np.nan).ffill().bfill()
         
         # Konversi Parameter NASA ke Potensi Daya (Faktor Ekstraksi Sederhana)
-        # ALLSKY_SFC_SW_DWN (Irradiasi Surya), WS10M (Kecepatan Angin), PRECTOTCORR (Curah Hujan untuk Air)
         df_clean = pd.DataFrame()
         df_clean['Tahun'] = df_raw['YEAR']
-        if 'ALLSKY_SFC_SW_DWN' in df_raw.columns: df_clean['PLTS (Surya)'] = df_raw['ALLSKY_SFC_SW_DWN'] * 3.5
-        if 'WS10M' in df_raw.columns: df_clean['PLTB (Angin)'] = df_raw['WS10M'] * 2.8
-        if 'PRECTOTCORR' in df_raw.columns: df_clean['PLTMH (Air)'] = df_raw['PRECTOTCORR'] * 1.5
         
+        has_data = False
+        if 'ALLSKY_SFC_SW_DWN' in df_raw.columns: 
+            df_clean['PLTS (Surya)'] = df_raw['ALLSKY_SFC_SW_DWN'] * 3.5
+            has_data = True
+        if 'WS10M' in df_raw.columns: 
+            df_clean['PLTB (Angin)'] = df_raw['WS10M'] * 2.8
+            has_data = True
+        if 'PRECTOTCORR' in df_raw.columns: 
+            df_clean['PLTMH (Air)'] = df_raw['PRECTOTCORR'] * 1.5
+            has_data = True
+            
+        if not has_data:
+            raise ValueError("File CSV tidak mengandung parameter EBT yang dibutuhkan (seperti ALLSKY_SFC_SW_DWN, WS10M, atau PRECTOTCORR).")
+            
         # Agregasi Rata-rata per Tahun
         data_input = df_clean.groupby('Tahun').mean()
         
@@ -112,7 +128,7 @@ def process_data_and_predict(file):
         # Prediksi Tren Dasar
         tren_prediksi = model.predict(X_pred)
         
-        # Menambahkan noise realistis (Siklus El Nino/La Nina)
+        # Menambahkan noise realistis (Siklus variasi alam)
         noise = np.random.normal(0, np.std(y_train) * 0.5, len(tahun_prediksi))
         data_ml_tahunan[col] = np.maximum(0, tren_prediksi + noise) # Tidak boleh minus
 
