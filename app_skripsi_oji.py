@@ -1,168 +1,3 @@
---- app_skripsi_oji.py (原始)
-import streamlit as st
-import pandas as pd
-import numpy as np
-import io, json
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score, mean_absolute_error
-import plotly.express as px
-
-st.set_page_config(page_title="Dashboard EBT Kulon Progo - Oji", layout="wide")
-st.title("⚡ Dashboard Analisis Potensi EBT (Hybrid Model)")
-
-# ==========================================
-# SIDEBAR
-# ==========================================
-uploaded_file = st.sidebar.file_uploader("Upload Data", type=["xlsx","csv","json"])
-
-kebijakan = st.sidebar.selectbox(
-    "Skenario",
-    ["Business as Usual (BAU)",
-     "Pajak Karbon Tinggi (Pro-Lingkungan)",
-     "Subsidi Masif EBT (Pro-Ekonomi)"]
-)
-
-# ==========================================
-# HYBRID FUNCTION
-# ==========================================
-@st.cache_data
-def process_data(file_bytes, file_name, kebijakan, tahun_akhir=2060):
-
-    SCENARIO = {
-        "Business as Usual (BAU)": (0.03, 2.0),
-        "Pajak Karbon Tinggi (Pro-Lingkungan)": (0.06, 3.0),
-        "Subsidi Masif EBT (Pro-Ekonomi)": (0.08, 3.5),
-    }
-
-    growth_rate, cap_mult = SCENARIO[kebijakan]
-
-    # ================= LOAD DATA =================
-    if file_name.endswith(".csv"):
-        df = pd.read_csv(io.StringIO(file_bytes.decode("utf-8")))
-        df = df.rename(columns={"YEAR":"Tahun"})
-        df = df.groupby("Tahun").mean()
-
-    elif file_name.endswith(".json"):
-        raw = json.loads(file_bytes.decode("utf-8"))
-        df = pd.DataFrame(raw)
-
-        if "Tahun" not in df.columns:
-            st.error("JSON harus punya kolom Tahun")
-            return None,None,None,None
-
-        df = df.set_index("Tahun")
-
-    else:
-        df = pd.read_excel(io.BytesIO(file_bytes)).set_index("Tahun")
-
-    df.index = df.index.astype(int)
-
-    # ================= HYBRID MODEL =================
-    tahun_pred = np.arange(2025, tahun_akhir+1)
-    X_train = df.index.values.reshape(-1,1)
-    X_pred  = tahun_pred.reshape(-1,1)
-
-    df_pred = pd.DataFrame(index=tahun_pred)
-    metrics = {}
-
-    for col in df.columns:
-
-        y = df[col].values
-
-        # kalau data terlalu sedikit → skip aman
-        if len(y) < 2:
-            df_pred[col] = np.repeat(y.mean(), len(tahun_pred))
-            metrics[col] = {"R2":0.0,"MAE":0.0}
-            continue
-
-        # --- Linear trend
-        model = LinearRegression()
-        model.fit(X_train, y)
-        trend = model.predict(X_pred)
-
-        # --- Growth policy
-        growth = np.exp(growth_rate * (tahun_pred - 2025))
-
-        hybrid = trend * growth
-
-        # --- Constraint
-        max_cap = np.max(y) * cap_mult
-        hybrid = np.clip(hybrid, 0, max_cap)
-
-        # --- Noise kecil
-        hybrid += np.random.normal(0, np.std(y)*0.03, len(hybrid))
-        hybrid = np.maximum(0, hybrid)
-
-        df_pred[col] = hybrid
-
-        # --- Metrics
-        y_pred_train = model.predict(X_train)
-
-        metrics[col] = {
-            "R2": round(float(r2_score(y, y_pred_train)),3),
-            "MAE": round(float(mean_absolute_error(y, y_pred_train)),3)
-        }
-
-    return df, df_pred, metrics
-
-
-# ==========================================
-# MAIN
-# ==========================================
-if uploaded_file:
-
-    df_hist, df_pred, metrics = process_data(
-        uploaded_file.getvalue(),
-        uploaded_file.name,
-        kebijakan
-    )
-
-    if df_hist is None:
-        st.stop()
-
-    # ================= METRICS =================
-    st.subheader("📊 Evaluasi Model")
-
-    if len(metrics)==0:
-        st.warning("Metrics tidak tersedia")
-    else:
-        metrics_df = pd.DataFrame(metrics).T
-
-        st.dataframe(
-            metrics_df.style
-            .format("{:.3f}")
-            .background_gradient(subset=["R2"], cmap="RdYlGn")
-            .background_gradient(subset=["MAE"], cmap="RdYlGn_r"),
-            use_container_width=True
-        )
-
-    # ================= PLOT =================
-    st.subheader("📈 Grafik Prediksi Hybrid")
-
-    df_hist_plot = df_hist.copy().reset_index()
-    df_hist_plot["Tipe"]="Historis"
-
-    df_pred_plot = df_pred.copy().reset_index()
-    df_pred_plot.rename(columns={"index":"Tahun"}, inplace=True)
-    df_pred_plot["Tipe"]="Prediksi"
-
-    df_all = pd.concat([df_hist_plot, df_pred_plot])
-
-    fig = px.line(
-        df_all.melt(id_vars=["Tahun","Tipe"]),
-        x="Tahun", y="value",
-        color="variable",
-        line_dash="Tipe"
-    )
-
-    fig.add_vline(x=2025, line_dash="dash")
-
-    st.plotly_chart(fig, use_container_width=True)
-
-else:
-    st.info("Upload data untuk mulai")
-
-+++ app_skripsi_oji.py (修改后)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -218,13 +53,13 @@ if st.sidebar.button("🎲 Generate Contoh Data Dummy"):
     }
     df_dummy = pd.DataFrame(data_dummy)
     csv_dummy = df_dummy.to_csv(index=False).encode('utf-8')
-
+    
     st.session_state['dummy_file'] = csv_dummy
     st.success("✅ Data dummy berhasil dibuat! Silakan download dan upload kembali, atau gunakan langsung.")
-
+    
     # Auto-load data dummy
     if 'dummy_file' in st.session_state:
-        uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv", "json"],
+        uploaded_file = st.sidebar.file_uploader("Upload File Data", type=["xlsx", "xls", "csv", "json"], 
                                                   value=st.session_state['dummy_file'],
                                                   key="dummyUploader")
 
@@ -303,14 +138,14 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
                     if param_key not in NASA_MAP:
                         continue
                     col_name, factor = NASA_MAP[param_key]
-
+                    
                     if "ANN" in monthly and monthly["ANN"] != fill_val:
                         ann_val = monthly["ANN"] * factor
                     else:
-                        valid_vals = [v for k, v in monthly.items()
+                        valid_vals = [v for k, v in monthly.items() 
                                      if k not in ["ANN", "DJF", "MAM", "JJA", "SON"] and v != fill_val]
                         ann_val = np.mean(valid_vals) * factor if valid_vals else 0
-
+                    
                     # Bangun mock data historis (10 tahun) dengan variasi kecil
                     for yr in range(2015, 2025):
                         noise = np.random.normal(0, ann_val * 0.05)
@@ -327,12 +162,12 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
                             month = int(k[4:])
                         except (ValueError, IndexError):
                             continue
-
+                            
                         if month == 13 or v == fill_val or v is None:
                             continue
-
+                        
                         year_data.setdefault(year, {}).setdefault(col_name, []).append(v * factor)
-
+                
                 # Rata-rata per tahun
                 for yr in year_data:
                     for col in year_data[yr]:
@@ -348,7 +183,7 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
         elif isinstance(raw_json, list):
             # JSON array format
             df_json = pd.DataFrame.from_records(raw_json)
-            df_json = df_json.rename(columns={c: "Tahun" for c in df_json.columns
+            df_json = df_json.rename(columns={c: "Tahun" for c in df_json.columns 
                                                if c.strip().lower() in {"tahun", "year"}})
             if "Tahun" not in df_json.columns:
                 raise ValueError("Kolom 'Tahun' atau 'Year' tidak ditemukan dalam JSON")
@@ -359,7 +194,7 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
         elif isinstance(raw_json, dict):
             # JSON object format
             df_json = pd.DataFrame({k: pd.Series(v) for k, v in raw_json.items()})
-            df_json = df_json.rename(columns={c: "Tahun" for c in df_json.columns
+            df_json = df_json.rename(columns={c: "Tahun" for c in df_json.columns 
                                                if c.strip().lower() in {"tahun", "year"}})
             if "Tahun" not in df_json.columns:
                 raise ValueError("Kolom 'Tahun' atau 'Year' tidak ditemukan dalam JSON")
@@ -377,26 +212,26 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
             if "-END HEADER-" in line or ("YEAR" in line and "MO" in line):
                 skip_rows = i + 1 if "-END HEADER-" in line else i
                 break
-
+        
         df_raw = pd.read_csv(io.StringIO(raw_text), skiprows=skip_rows)
         df_raw = df_raw.replace(-999.0, np.nan).ffill().bfill()
-
+        
         df_clean = pd.DataFrame({'Tahun': df_raw['YEAR'].astype(int)})
-
+        
         # Konversi parameter NASA ke MW dengan faktor realistis
         conversion_factors = {
             'ALLSKY_SFC_SW_DWN': ('PLTS (Surya)', 0.0036),
             'WS10M': ('PLTB (Angin)', 0.15),
             'PRECTOTCORR': ('PLTMH (Air)', 0.05)
         }
-
+        
         for nasa_col, (new_col, factor) in conversion_factors.items():
             if nasa_col in df_raw.columns:
                 df_clean[new_col] = df_raw[nasa_col] * factor
-
+        
         if len(df_clean.columns) == 1:  # Hanya kolom Tahun
             raise ValueError("Tidak ada parameter EBT yang ditemukan dalam CSV")
-
+            
         data_input = df_clean.groupby('Tahun').mean()
 
     else:
@@ -405,7 +240,7 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
             data_input = pd.read_excel(io.BytesIO(file_bytes))
         except Exception as e:
             raise ValueError(f"Gagal membaca file Excel: {e}")
-
+            
         if "Tahun" in data_input.columns:
             data_input = data_input.set_index("Tahun")
         elif "tahun" in data_input.columns.str.lower():
@@ -433,7 +268,7 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
 
     for col in data_input.columns:
         y_train = data_input[col].values.astype(float)
-
+        
         # Handle data dengan variansi nol
         if np.std(y_train) == 0:
             base_val = float(np.mean(y_train))
@@ -441,9 +276,9 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
             data_ml_bulan[col] = base_val
             metrics[col] = {"R²": 1.0, "MAE": 0.0}
             continue
-
+            
         base_val = float(np.mean(y_train))
-        noise_std = np.std(y_train) * 0.3
+        noise_std = np.std(y_train) * 0.3 
 
         # Adaptive polynomial degree based on data length
         n_samples = len(y_train)
@@ -458,7 +293,7 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
             ('poly', PolynomialFeatures(degree=degree, include_bias=False)),
             ('reg', LinearRegression())
         ])
-
+        
         try:
             pipeline.fit(X_train, y_train)
         except Exception as e:
@@ -471,16 +306,16 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
 
         y_pred_hist = pipeline.predict(X_train)
         metrics[col] = {
-            "R²": round(r2_score(y_train, y_pred_hist), 3),
+            "R²": round(r2_score(y_train, y_pred_hist), 3), 
             "MAE": round(mean_absolute_error(y_train, y_pred_hist), 3)
         }
 
         tren_tahunan = pipeline.predict(X_pred)
-
+        
         # Apply realistic bounds to prevent unrealistic predictions
         max_historis = np.max(y_train) * 3  # Maksimum 3x nilai historis tertinggi
         min_historis = np.min(y_train) * 0.5  # Minimum 50% dari nilai historis terendah
-
+        
         noise_tahun = rng.normal(0, noise_std, len(tahun_prediksi))
         prediksi_dengan_noise = tren_tahunan + noise_tahun
         data_ml_tahunan[col] = np.clip(prediksi_dengan_noise, min_historis, max_historis)
