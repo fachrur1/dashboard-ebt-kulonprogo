@@ -188,11 +188,15 @@ def process_data_and_predict(file_bytes, file_name, tahun_akhir=2060, random_see
         base_val = float(np.mean(y_train))
         noise_std = np.std(y_train) * 0.3 
 
-        pipeline = Pipeline([
-            ('poly', PolynomialFeatures(degree=2, include_bias=False)),
-            ('reg', LinearRegression())
-        ])
-        pipeline.fit(X_train, y_train)
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+        
+        trend = model.predict(X_pred)
+        
+        # Tambahkan batas maksimum (realistis)
+        max_cap = np.max(y_train) * 2.5  # asumsi growth max 2.5x historis
+        
+        trend = np.clip(trend, 0, max_cap)
 
         y_pred_hist = pipeline.predict(X_train)
         metrics[col] = {"R²": round(r2_score(y_train, y_pred_hist), 3), "MAE": round(mean_absolute_error(y_train, y_pred_hist), 3)}
